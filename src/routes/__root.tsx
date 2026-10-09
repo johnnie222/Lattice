@@ -1,6 +1,7 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
+import { PwaRegister } from "@/components/pwa-register";
 import appCss from "../styles.css?url";
 
 const APP_NAME = "LATTICE";
@@ -15,13 +16,13 @@ export const Route = createRootRoute({
       { name: "description", content: "Live stock heatmaps for the S&P 500, Nasdaq 100, sector ETFs, and your book." },
     ],
     links: [
-      { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
+      { rel: "icon", type: "image/png", sizes: "192x192", href: "/icons/lattice-192.png" },
       { rel: "stylesheet", href: appCss },
       {
         rel: "stylesheet",
         href: "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap",
       },
-      { rel: "manifest", href: "/manifest.webmanifest?v=2" },
+      { rel: "manifest", href: "/manifest.webmanifest?v=3" },
       { rel: "apple-touch-icon", sizes: "180x180", href: "/icons/lattice-180.png" },
     ],
   }),
@@ -31,6 +32,7 @@ export const Route = createRootRoute({
         <HeadContent />
       </head>
       <body>
+        <PwaRegister />
         <PreviewHostBridge />
         <AuthProvider>
           <Outlet />

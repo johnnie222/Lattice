@@ -1,13 +1,14 @@
 {
   "name": "LATTICE",
   "short_name": "LATTICE",
-  "id": "/lattice-pwa",
+  "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#07080b",
   "theme_color": "#07080b",
   "description": "Live stock heatmaps for major US indexes, sectors, and your book.",
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "/icons/lattice-192.png",
@@ -19,7 +20,13 @@
       "src": "/icons/lattice-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/lattice-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

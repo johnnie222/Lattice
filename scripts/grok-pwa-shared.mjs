@@ -187,7 +187,7 @@ export function grokPwaHeadTags(appName = DEFAULT_APP_NAME) {
   return [
     // Standalone display comes from the manifest ("display": "standalone");
     // the legacy *-web-app-capable metas it replaces are deliberately absent.
-    ["manifest", '<link rel="manifest" href="/manifest.webmanifest?v=2">'],
+    ["manifest", '<link rel="manifest" href="/manifest.webmanifest?v=3">'],
     ["apple-touch-icon", '<link rel="apple-touch-icon" href="/icons/lattice-180.png">'],
     [
       "apple-mobile-web-app-title",
@@ -451,7 +451,7 @@ export function injectGrokPwaHead(html, ctx = {}) {
 
   const missing = grokPwaHeadTags(appName)
     .filter(([key]) => {
-      if (key === "manifest") return !next.includes('href="/manifest.webmanifest?v=2"');
+      if (key === "manifest") return !next.includes('href="/manifest.webmanifest?v=3"');
       if (key === "apple-touch-icon") return !next.includes('href="/icons/lattice-180.png"');
       return !next.includes(`name="${key}"`);
     })
