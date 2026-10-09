@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { ChevronDown, ChevronLeft, Filter, Search } from "lucide-react";
+import { ChevronDown, ChevronLeft, ListFilter, Search, Settings } from "lucide-react";
 import { BOARDS, sectorLabel, type SectorId } from "@/data/universe";
 import { Heatmap } from "@/components/heatmap";
 import { BoardSheet, BookSheet, FilterSheet, InfoSheet, StockSheet, type SheetId } from "@/components/sheets";
-import { formatAsOf, formatPct, marketClock, sessionLabel, type Session } from "@/lib/format";
+import { SettingsSheet } from "@/components/settings-sheet";
+import { formatAsOf, formatLevel, formatPct, marketClock, type Session } from "@/lib/format";
 import {
   applyPriceWeights,
+  benchmarkSymbol,
   boardById,
   boardNodes,
   findListing,
@@ -18,11 +20,47 @@ import {
   type MapNode,
 } from "@/lib/market";
 import { useQuotes } from "@/lib/use-quotes";
+import { useApplyTheme } from "@/lib/theme";
 import { activeBook, useBooks } from "@/store/books";
 
 function formatDollars(n: number): string {
   const sign = n > 0 ? "+" : n < 0 ? "-" : "";
   return `${sign}$${Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+}
+
+const SESSION_TEXT: Record<Session, string> = {
+  open: "Market Open",
+  pre: "Pre-Market",
+  post: "After Hours",
+  closed: "Market Closed",
+  holiday: "Market Holiday",
+};
+
+function GlassButton({
+  label,
+  onClick,
+  pressed,
+  dot,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  pressed?: boolean;
+  dot?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      aria-pressed={pressed}
+      onClick={onClick}
+      className={`glass glass-pressable relative grid size-11 shrink-0 place-items-center rounded-full ${pressed ? "text-accent" : "text-fg"}`}
+    >
+      {children}
+      {dot ? <span className="absolute right-2 top-2 size-2 rounded-full bg-accent" /> : null}
+    </button>
+  );
 }
 
 const DEFAULT_BOARD = "spx";
@@ -36,6 +74,7 @@ const STALE_MS: Record<Session, number> = {
 };
 
 export function Lattice() {
+  useApplyTheme();
   // Board, sector drill and search live in the URL so a view can be shared.
   const search = useSearch({ from: "/" });
   const navigate = useNavigate({ from: "/" });
@@ -96,10 +135,12 @@ export function Lattice() {
 
   // Symbols come from the quote-independent nodes so price weighting can't
   // change the fetch key and restart polling.
-  const symbols = useMemo(
-    () => [...rawNodes].sort((a, b) => b.weight - a.weight).map((node) => node.symbol),
-    [rawNodes],
-  );
+  // The benchmark (index level or fund price) rides along in the same fetch.
+  const bench = bookMode ? null : benchmarkSymbol(board);
+  const symbols = useMemo(() => {
+    const list = [...rawNodes].sort((a, b) => b.weight - a.weight).map((node) => node.symbol);
+    return bench ? [bench, ...list.filter((symbol) => symbol !== bench)] : list;
+  }, [rawNodes, bench]);
   const { quotes, asOf, status } = useQuotes(symbols, refreshToken);
   const priceWeighted = !bookMode && board.weighting === "price";
   const baseNodes = useMemo(
@@ -123,18 +164,11 @@ export function Lattice() {
   const downs = quoted.filter((node) => (quotes[node.symbol]?.changePercent ?? 0) < -0.05).length;
 
   const title = bookMode ? book.name : drill ? sectorLabel(drill) : board.title;
-  const subtitle = bookMode
-    ? "Your weights"
-    : drill
-      ? board.title
-      : board.name !== board.title
-        ? board.name
-        : "";
 
   useEffect(() => {
     const tick = () => setClock(marketClock());
     tick();
-    const timer = window.setInterval(tick, 1000);
+    const timer = window.setInterval(tick, 10_000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -184,106 +218,151 @@ export function Lattice() {
   const showMap = visible.length > 0;
   const bookEmpty = bookMode && book.lines.filter((line) => line.weight > 0).length === 0;
 
+  // Headline: the real index level / fund price when we have it; otherwise
+  // the weighted move of what's on screen.
+  const benchQuote = bench && !drill ? quotes[bench] : undefined;
+  const headPct = benchQuote ? benchQuote.changePercent : move;
+  const headUp = (headPct ?? 0) >= 0;
+  const caption = bookMode
+    ? "Your portfolio · today"
+    : drill
+      ? `${board.title} · ${sectorLabel(drill)} sector`
+      : benchQuote
+        ? board.group === "Index"
+          ? `${board.name === "US market" ? "S&P 500" : board.title} index`
+          : `${board.name} · fund price`
+        : "Weighted move";
+  const updated = asOfLabel
+    ? stale
+      ? `Delayed ${asOfLabel}`
+      : asOfLabel
+    : status === "error"
+      ? "Prices unavailable"
+      : "Updating…";
+  const flats = quoted.length - ups - downs;
+  const mood = headPct == null ? "transparent" : headUp ? "var(--up-text)" : "var(--dn-text)";
+
   return (
-    <main className="flex h-dvh flex-col bg-bg pb-[env(safe-area-inset-bottom)] text-fg">
-      <header className="safe-t shrink-0 px-2 pb-2">
-        <div className="flex items-center gap-1">
+    <main
+      className="ambient flex h-dvh flex-col pb-[env(safe-area-inset-bottom)] text-fg"
+      style={{ "--mood": mood } as CSSProperties}
+    >
+      <header className="safe-t shrink-0 px-3 pb-2">
+        <div className="flex h-12 items-center gap-2">
           {drill ? (
-            <button
-              type="button"
-              onClick={() => setDrill(null)}
-              className="grid size-11 shrink-0 place-items-center rounded-xl"
-              aria-label="Back to full map"
-            >
-              <ChevronLeft className="size-6" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setRefreshToken((n) => n + 1)}
-              className="flex h-11 shrink-0 items-center gap-2 rounded-xl px-2"
-              aria-label="Refresh quotes"
-            >
-              <span className={`size-2 rounded-full ${session === "open" ? "bg-up" : "bg-muted"}`} />
-              <span className={`font-mono text-sm ${session === "open" ? "text-up" : "text-muted"}`}>
-                {clock?.label ?? "--:--:--"}
-              </span>
-            </button>
-          )}
-          <div className="min-w-0 flex-1 text-center">
+            <GlassButton label="Back to full map" onClick={() => setDrill(null)}>
+              <ChevronLeft className="size-5" />
+            </GlassButton>
+          ) : null}
+          <div className="min-w-0 flex-1 pl-1">
             {drill ? (
-              <p className="truncate text-base font-semibold tracking-tight">{title}</p>
+              <h1 className="truncate text-[28px] font-bold leading-tight tracking-tight">{title}</h1>
             ) : (
               <button
                 type="button"
                 onClick={() => setSheet("boards")}
-                className="inline-flex max-w-full items-center justify-center gap-1"
+                className="flex max-w-full items-center gap-1 text-left"
               >
-                <span className="truncate text-base font-semibold tracking-tight">{title}</span>
-                <ChevronDown className="size-4 shrink-0 text-muted" />
+                <h1 className="truncate text-[28px] font-bold leading-tight tracking-tight">{title}</h1>
+                <ChevronDown className="mt-1 size-5 shrink-0 text-muted" strokeWidth={2.5} />
               </button>
             )}
-            <p className={`font-mono text-sm font-medium ${move == null ? "text-muted" : move >= 0 ? "text-up" : "text-down"}`}>
-              {move == null ? (status === "error" ? "Tape delayed" : "Loading tape") : formatPct(move)}
-              {pnl != null ? <span className="text-fg"> · {formatDollars(pnl)}</span> : null}
-            </p>
           </div>
-          <button
-            type="button"
-            aria-label="Search"
-            aria-pressed={searchOpen}
-            onClick={() => setSearchOpen((open) => !open)}
-            className="grid size-11 shrink-0 place-items-center rounded-xl bg-surface"
-          >
-            <Search className="size-5" />
-          </button>
-          <button
-            type="button"
-            aria-label="Filter"
-            onClick={() => setSheet("filter")}
-            className="relative grid size-11 shrink-0 place-items-center rounded-xl bg-surface"
-          >
-            <Filter className="size-5" />
-            {filter !== "all" ? <span className="absolute right-2 top-2 size-1.5 rounded-full bg-up" /> : null}
-          </button>
+          <GlassButton label="Search" pressed={searchOpen} onClick={() => setSearchOpen((open) => !open)}>
+            <Search className="size-[18px]" strokeWidth={2.25} />
+          </GlassButton>
+          <GlassButton label="Filter" dot={filter !== "all"} onClick={() => setSheet("filter")}>
+            <ListFilter className="size-[18px]" strokeWidth={2.25} />
+          </GlassButton>
+          <GlassButton label="Settings" onClick={() => setSheet("settings")}>
+            <Settings className="size-[19px]" strokeWidth={2.1} />
+          </GlassButton>
         </div>
-        <p className="truncate px-2 text-center text-xs text-muted">
-          {subtitle ? `${subtitle} · ` : ""}
-          {sessionLabel(session)}
-          {quoted.length ? ` · ${ups} up · ${downs} down` : ""}
-          {asOfLabel ? (
-            <span className={stale ? "text-down" : undefined}>
-              {stale ? ` · Delayed, as of ${asOfLabel}` : ` · as of ${asOfLabel}`}
+
+        <div className="mt-1 px-1">
+          <div className="flex items-center justify-between gap-3 text-[13px] text-muted">
+            <p className="min-w-0 truncate">
+              {caption}
+              {bookMode ? (
+                <>
+                  {" · "}
+                  <button type="button" className="font-semibold text-accent" onClick={() => setSheet("book")}>
+                    Edit
+                  </button>
+                </>
+              ) : null}
+            </p>
+            <button
+              type="button"
+              onClick={() => setRefreshToken((n) => n + 1)}
+              aria-label={`${SESSION_TEXT[session]}. ${updated}. Refresh prices`}
+              className="flex shrink-0 items-center gap-1.5"
+            >
+              <span className={`size-1.5 rounded-full ${session === "open" ? "bg-up" : "bg-muted"}`} />
+              <span>{SESSION_TEXT[session]}</span>
+              <span className={stale || status === "error" ? "text-down" : undefined}>· {updated}</span>
+            </button>
+          </div>
+          <div className="mt-0.5 flex items-center gap-2.5">
+            <span className="tabular text-[34px] font-semibold leading-tight tracking-tight">
+              {benchQuote ? formatLevel(benchQuote.price) : headPct != null ? formatPct(headPct) : "—"}
             </span>
-          ) : null}
-          {bookMode ? (
-            <>
-              {" · "}
-              <button type="button" className="font-medium text-fg" onClick={() => setSheet("book")}>
-                Edit weights
-              </button>
-            </>
-          ) : null}
-        </p>
-        {searchOpen ? (
-          <div className="mt-2 flex items-center gap-2 px-1">
-            <input
-              ref={searchRef}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Ticker, name, or industry"
-              aria-label="Search the map"
-              className="h-11 min-w-0 flex-1 rounded-xl border border-line bg-surface px-3 text-sm"
-            />
-            {query ? (
-              <button type="button" className="h-11 px-2 text-sm text-muted" onClick={() => setQuery("")}>
-                Clear
-              </button>
+            {headPct != null && (benchQuote || pnl != null) ? (
+              <span
+                className={`tabular shrink-0 rounded-full px-2.5 py-1 text-[13px] font-semibold ${headUp ? "text-up" : "text-down"}`}
+                style={{
+                  background: `color-mix(in srgb, ${headUp ? "var(--up-text)" : "var(--dn-text)"} 16%, transparent)`,
+                }}
+              >
+                {benchQuote
+                  ? `${benchQuote.change >= 0 ? "▲" : "▼"} ${Math.abs(benchQuote.change).toFixed(2)} (${Math.abs(benchQuote.changePercent).toFixed(2)}%)`
+                  : formatDollars(pnl ?? 0)}
+              </span>
             ) : null}
+          </div>
+        </div>
+
+        {quoted.length ? (
+          <div className="mt-2 px-1" aria-label={`${ups} advancing, ${downs} declining`}>
+            <div className="flex h-1 overflow-hidden rounded-full bg-line">
+              <span className="bg-up" style={{ width: `${(ups / quoted.length) * 100}%` }} />
+              <span className="bg-line" style={{ width: `${(flats / quoted.length) * 100}%` }} />
+              <span className="bg-down" style={{ width: `${(downs / quoted.length) * 100}%` }} />
+            </div>
+            <div className="tabular mt-1 flex justify-between text-[11px] font-medium text-muted">
+              <span>{ups} advancing</span>
+              <span>{downs} declining</span>
+            </div>
+          </div>
+        ) : null}
+
+        {searchOpen ? (
+          <div className="mt-2 flex items-center gap-2">
+            <div className="glass flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full px-4">
+              <Search className="size-4 shrink-0 text-muted" />
+              <input
+                ref={searchRef}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Ticker, company, or industry"
+                aria-label="Search the map"
+                className="h-full min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted"
+              />
+            </div>
+            <button
+              type="button"
+              className="h-11 px-1 text-[15px] font-medium text-accent"
+              onClick={() => {
+                setQuery("");
+                setSearchOpen(false);
+              }}
+            >
+              Cancel
+            </button>
           </div>
         ) : null}
       </header>
-      <div className="relative min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1 px-1.5 pb-1.5">
         {bookEmpty ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
             <p className="text-lg font-semibold">Build a book</p>
@@ -293,7 +372,7 @@ export function Lattice() {
             <button
               type="button"
               onClick={() => setSheet("book")}
-              className="h-12 rounded-xl bg-fg px-5 font-semibold text-bg"
+              className="glass-pressable h-12 rounded-full bg-fg px-6 font-semibold text-bg"
             >
               Add positions
             </button>
@@ -313,7 +392,7 @@ export function Lattice() {
             <p className="text-sm text-muted">Try another filter or a shorter search.</p>
             <button
               type="button"
-              className="h-11 rounded-xl border border-line px-4 text-sm font-medium"
+              className="glass glass-pressable h-11 rounded-full px-5 text-sm font-medium"
               onClick={() => {
                 setFilter("all");
                 setQuery("");
@@ -345,6 +424,14 @@ export function Lattice() {
         <FilterSheet filter={filter} onChange={setFilter} onClose={() => setSheet(null)} />
       ) : null}
       {sheet === "info" ? <InfoSheet onClose={() => setSheet(null)} /> : null}
+      {sheet === "settings" ? (
+        <SettingsSheet
+          asOf={asOf}
+          status={status}
+          onInfo={() => setSheet("info")}
+          onClose={() => setSheet(null)}
+        />
+      ) : null}
       {sheet === "book" ? <BookSheet onClose={() => setSheet(null)} /> : null}
       {sheet === "stock" && selected ? (
         <StockSheet

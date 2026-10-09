@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import viteReact from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+// @ts-expect-error JS helper alongside the TS vite config
+import { appVersionDefines } from "./scripts/app-version.mjs";
 
 const src = fileURLToPath(new URL("./src", import.meta.url));
 
@@ -13,6 +15,7 @@ export default defineConfig({
   base: "./",
   publicDir: false,
   envDir: "..",
+  define: appVersionDefines(),
   resolve: {
     alias: [
       { find: "@/lib/quote-source", replacement: `${src}/lib/quote-source.native.ts` },

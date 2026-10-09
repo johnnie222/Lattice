@@ -160,16 +160,22 @@ export function formatAsOf(at: number, now = Date.now()): string {
 }
 
 export function heatClass(pct: number | null): string {
-  if (pct == null || Number.isNaN(pct)) return "bg-heat-wait";
-  if (pct >= 4) return "bg-heat-up5";
-  if (pct >= 2.5) return "bg-heat-up4";
-  if (pct >= 1.25) return "bg-heat-up3";
-  if (pct >= 0.4) return "bg-heat-up2";
-  if (pct > 0.05) return "bg-heat-up1";
-  if (pct >= -0.05) return "bg-heat-flat";
-  if (pct > -0.4) return "bg-heat-dn1";
-  if (pct > -1.25) return "bg-heat-dn2";
-  if (pct > -2.5) return "bg-heat-dn3";
-  if (pct > -4) return "bg-heat-dn4";
-  return "bg-heat-dn5";
+  if (pct == null || Number.isNaN(pct)) return "heat-wait";
+  if (pct >= 4) return "heat-up5";
+  if (pct >= 2.5) return "heat-up4";
+  if (pct >= 1.25) return "heat-up3";
+  if (pct >= 0.4) return "heat-up2";
+  if (pct > 0.05) return "heat-up1";
+  if (pct >= -0.05) return "heat-flat";
+  if (pct > -0.4) return "heat-dn1";
+  if (pct > -1.25) return "heat-dn2";
+  if (pct > -2.5) return "heat-dn3";
+  if (pct > -4) return "heat-dn4";
+  return "heat-dn5";
+}
+
+/** 7807.13 → "7,807.13" */
+export function formatLevel(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }

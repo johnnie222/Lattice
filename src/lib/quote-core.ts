@@ -26,7 +26,8 @@ export function parseSymbols(input: unknown): { symbols: string[]; fresh: boolea
     new Set(
       raw
         .map((s) => String(s).trim().toUpperCase().replace(/\./g, "-"))
-        .filter((s) => /^[A-Z0-9-]{1,10}$/.test(s)),
+        // A leading ^ marks an index (^GSPC, ^NDX, ^DJI).
+        .filter((s) => /^\^?[A-Z0-9-]{1,10}$/.test(s)),
     ),
   ).slice(0, 600);
   return { symbols, fresh: obj.fresh === true };
@@ -37,7 +38,7 @@ function sleep(ms: number) {
 }
 
 async function fetchChunk(get: HttpGet, symbols: string[]): Promise<Quote[]> {
-  const url = `https://query2.finance.yahoo.com/v8/finance/spark?symbols=${symbols.join(",")}&range=1d&interval=1d`;
+  const url = `https://query2.finance.yahoo.com/v8/finance/spark?symbols=${symbols.map(encodeURIComponent).join(",")}&range=1d&interval=1d`;
   let last = "quote failed";
   for (let attempt = 0; attempt < 3; attempt++) {
     const res = await get(url, {

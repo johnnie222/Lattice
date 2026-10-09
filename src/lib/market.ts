@@ -168,3 +168,10 @@ export function suggestListings(query: string, limit = 6): Listing[] {
   }
   return [...starts, ...rest].slice(0, limit);
 }
+
+const INDEX_SYMBOL: Record<string, string> = { spx: "^GSPC", ndx: "^NDX", dow: "^DJI" };
+
+/** The quote shown in the header banner: the real index, or the fund itself. */
+export function benchmarkSymbol(board: Board): string {
+  return INDEX_SYMBOL[board.id] ?? board.title;
+}

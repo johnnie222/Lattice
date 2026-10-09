@@ -2,15 +2,15 @@
   "appId": "com.johnnie222.lattice",
   "appName": "Lattice",
   "webDir": "dist-mobile",
-  "backgroundColor": "#07080b",
+  "backgroundColor": "#000000",
   "android": {
-    "backgroundColor": "#07080b"
+    "backgroundColor": "#000000"
   },
   "plugins": {
     "SystemBars": {
       "insetsHandling": "css",
       "initialViewportFitValueHint": "cover",
-      "style": "DARK"
+      "style": "DEFAULT"
     },
     "CapacitorHttp": {
       "enabled": false

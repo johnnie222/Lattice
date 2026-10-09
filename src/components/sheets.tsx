@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { X } from "lucide-react";
-import { BOARDS, sectorLabel, type Board, type SectorId } from "@/data/universe";
+import { Check, ChevronRight, X } from "lucide-react";
+import { BOARDS, sectorLabel, type SectorId } from "@/data/universe";
 import { formatCap, formatPct, formatPrice } from "@/lib/format";
 import {
   boardNodes,
@@ -15,9 +15,9 @@ import type { Quote } from "@/lib/quote-core";
 import { activeBook, useBooks, type Book } from "@/store/books";
 import { Mark } from "@/components/mark";
 
-export type SheetId = "boards" | "filter" | "info" | "book" | "stock";
+export type SheetId = "boards" | "filter" | "info" | "book" | "stock" | "settings";
 
-function Sheet({
+export function Sheet({
   title,
   onClose,
   children,
@@ -27,31 +27,88 @@ function Sheet({
   children: ReactNode;
 }) {
   return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center">
+    <div className="fixed inset-0 z-40 flex items-end justify-center p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
       <button type="button" className="scrim absolute inset-0" aria-label="Close" onClick={onClose} />
       <div
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="sheet-panel safe-b relative flex max-h-[min(86dvh,760px)] w-full max-w-lg flex-col rounded-t-2xl border border-line bg-surface"
+        className="sheet-panel glass glass-sheet relative flex max-h-[min(86dvh,760px)] w-full max-w-lg flex-col rounded-[30px]"
       >
         <div className="flex justify-center pt-2" aria-hidden="true">
-          <span className="h-1 w-10 rounded-full bg-line" />
+          <span className="h-1 w-9 rounded-full bg-muted/40" />
         </div>
-        <div className="flex items-center justify-between gap-3 px-4 pb-2 pt-3">
-          <h2 className="text-base font-semibold tracking-tight">{title}</h2>
+        <div className="grid grid-cols-[40px_1fr_40px] items-center px-3 pb-2 pt-1">
+          <span />
+          <h2 className="truncate text-center text-[17px] font-semibold tracking-tight">{title}</h2>
           <button
             type="button"
             onClick={onClose}
-            className="grid size-11 place-items-center rounded-xl text-muted"
+            className="glass-pressable grid size-9 place-items-center rounded-full bg-surface-2/80 text-muted"
             aria-label="Close"
           >
-            <X className="size-5" />
+            <X className="size-4" strokeWidth={2.5} />
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4">{children}</div>
       </div>
     </div>
+  );
+}
+
+/** iOS-style inset grouped list. */
+export function ListGroup({ title, footer, children }: { title?: string; footer?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="mb-5">
+      {title ? <h3 className="px-4 pb-1.5 text-[13px] font-medium uppercase tracking-wide text-muted">{title}</h3> : null}
+      <div className="divide-y divide-line/70 overflow-hidden rounded-2xl bg-surface/80">{children}</div>
+      {footer ? <p className="px-4 pt-1.5 text-xs leading-relaxed text-muted">{footer}</p> : null}
+    </section>
+  );
+}
+
+export function ListRow({
+  title,
+  subtitle,
+  detail,
+  checked,
+  chevron,
+  tone,
+  wrap,
+  leading,
+  onClick,
+}: {
+  title: ReactNode;
+  subtitle?: ReactNode;
+  detail?: ReactNode;
+  checked?: boolean;
+  chevron?: boolean;
+  tone?: "danger";
+  wrap?: boolean;
+  leading?: ReactNode;
+  onClick?: () => void;
+}) {
+  const body = (
+    <>
+      {leading}
+      <span className="min-w-0 flex-1">
+        <span className={`block truncate text-[15px] ${tone === "danger" ? "text-down" : ""}`}>{title}</span>
+        {subtitle ? (
+          <span className={`block text-xs leading-snug text-muted ${wrap ? "" : "truncate"}`}>{subtitle}</span>
+        ) : null}
+      </span>
+      {detail ? <span className="tabular shrink-0 text-right text-[15px] text-muted">{detail}</span> : null}
+      {checked ? <Check className="size-[18px] shrink-0 text-accent" strokeWidth={2.75} /> : null}
+      {chevron ? <ChevronRight className="size-4 shrink-0 text-muted/70" strokeWidth={2.5} /> : null}
+    </>
+  );
+  const cls = "flex min-h-12 w-full items-center gap-3 px-4 py-2 text-left";
+  return onClick ? (
+    <button type="button" onClick={onClick} className={`${cls} active:bg-surface-2/60`}>
+      {body}
+    </button>
+  ) : (
+    <div className={cls}>{body}</div>
   );
 }
 
@@ -74,28 +131,20 @@ export function FilterSheet({
 }) {
   return (
     <Sheet title="Filter" onClose={onClose}>
-      <div className="flex flex-col gap-2">
-        {FILTERS.map((item) => {
-          const on = item.id === filter;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => {
-                onChange(item.id);
-                onClose();
-              }}
-              className={`flex h-14 items-center justify-between rounded-xl border px-3 text-left ${on ? "border-up bg-surface-2" : "border-line"}`}
-            >
-              <span>
-                <span className="block text-sm font-semibold">{item.label}</span>
-                <span className="block text-xs text-muted">{item.hint}</span>
-              </span>
-              <span className={`size-2.5 rounded-full ${on ? "bg-up" : "bg-line"}`} />
-            </button>
-          );
-        })}
-      </div>
+      <ListGroup>
+        {FILTERS.map((item) => (
+          <ListRow
+            key={item.id}
+            title={item.label}
+            subtitle={item.hint}
+            checked={item.id === filter}
+            onClick={() => {
+              onChange(item.id);
+              onClose();
+            }}
+          />
+        ))}
+      </ListGroup>
     </Sheet>
   );
 }
@@ -158,73 +207,38 @@ export function BoardSheet({
 
   return (
     <Sheet title="Markets" onClose={onClose}>
-      <section className="mb-4">
-        <h3 className="mb-2 text-xs font-semibold tracking-wide text-muted">Your book</h3>
-        <button
-          type="button"
+      <ListGroup title="Your portfolio">
+        <ListRow
+          title={bookName}
+          subtitle={
+            bookCount === 0 ? "Empty · add weights" : `${bookCount} ${bookCount === 1 ? "name" : "names"} · your weights`
+          }
+          checked={boardId === "book"}
           onClick={onBook}
-          className={`flex h-14 w-full items-center justify-between rounded-xl border px-3 text-left ${boardId === "book" ? "border-up bg-surface-2" : "border-line"}`}
-        >
-          <span>
-            <span className="block text-sm font-semibold">{bookName}</span>
-            <span className="block text-xs text-muted">
-              {bookCount === 0
-                ? "Empty · add weights"
-                : `${bookCount} ${bookCount === 1 ? "name" : "names"} · your weights`}
-            </span>
-          </span>
-          <span className={`size-2.5 rounded-full ${boardId === "book" ? "bg-up" : "bg-line"}`} />
-        </button>
-      </section>
+        />
+      </ListGroup>
       {groups.map((group) => (
-        <section key={group} className="mb-4">
-          <h3 className="mb-2 text-xs font-semibold tracking-wide text-muted">{group}</h3>
-          <div className="flex flex-col gap-2">
-            {BOARDS.filter((board) => board.group === group).map((board) => (
-              <BoardRow
-                key={board.id}
-                board={board}
-                count={counts.get(board.id) ?? 0}
-                active={board.id === boardId}
-                onPick={() => onPick(board.id)}
-              />
-            ))}
-          </div>
-        </section>
+        <ListGroup key={group} title={group === "Sector ETF" ? "Sector funds" : group === "Index" ? "Indexes" : "Themes"}>
+          {BOARDS.filter((board) => board.group === group).map((board) => (
+            <ListRow
+              key={board.id}
+              title={
+                <>
+                  <span className="font-semibold">{board.title}</span>
+                  {board.name !== board.title ? <span className="text-muted"> · {board.name}</span> : null}
+                </>
+              }
+              detail={`${counts.get(board.id) ?? 0}`}
+              checked={board.id === boardId}
+              onClick={() => onPick(board.id)}
+            />
+          ))}
+        </ListGroup>
       ))}
-      <button type="button" onClick={onInfo} className="mb-2 h-11 text-sm font-medium text-fg">
-        How to read this map
-      </button>
+      <ListGroup>
+        <ListRow title="How to read the map" chevron onClick={onInfo} />
+      </ListGroup>
     </Sheet>
-  );
-}
-
-function BoardRow({
-  board,
-  count,
-  active,
-  onPick,
-}: {
-  board: Board;
-  count: number;
-  active: boolean;
-  onPick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onPick}
-      className={`flex h-14 w-full items-center justify-between rounded-xl border px-3 text-left ${active ? "border-up bg-surface-2" : "border-line"}`}
-    >
-      <span className="min-w-0">
-        <span className="block truncate text-sm font-semibold">
-          {board.title}
-          {board.name !== board.title ? <span className="font-normal text-muted"> · {board.name}</span> : null}
-        </span>
-        <span className="block text-xs text-muted">{count} names</span>
-      </span>
-      <span className={`size-2.5 shrink-0 rounded-full ${active ? "bg-up" : "bg-line"}`} />
-    </button>
   );
 }
 
@@ -263,7 +277,7 @@ export function StockSheet({
   return (
     <Sheet title={symbol} onClose={onClose}>
       <div className="flex items-center gap-3">
-        <Mark symbol={symbol} size={56} />
+        <Mark symbol={symbol} size={60} />
         <div className="min-w-0">
           <p className="truncate text-lg font-semibold">{listing.name}</p>
           <p className="truncate text-sm text-muted">
@@ -272,7 +286,7 @@ export function StockSheet({
           </p>
         </div>
       </div>
-      <p className="mt-4 font-mono text-3xl font-medium tracking-tight">
+      <p className="tabular mt-4 text-4xl font-semibold tracking-tight">
         {quote ? formatPrice(quote.price) : "—"}
       </p>
       <p className={`mt-1 font-mono text-sm ${quote ? (up ? "text-up" : "text-down") : "text-muted"}`}>
@@ -297,11 +311,11 @@ export function StockSheet({
           inputMode="decimal"
           value={weight}
           onChange={(event) => setWeight(event.target.value)}
-          className="h-12 w-28 rounded-xl border border-line bg-bg px-3 font-mono text-base"
+          className="tabular h-12 w-28 rounded-2xl bg-surface/80 px-4 text-base outline-none"
         />
         <button
           type="button"
-          className="h-12 flex-1 rounded-xl bg-fg font-semibold text-bg"
+          className="glass-pressable h-12 flex-1 rounded-full bg-accent font-semibold text-white"
           onClick={() => {
             const next = Number(weight);
             if (!Number.isFinite(next)) return;
@@ -309,7 +323,7 @@ export function StockSheet({
             onClose();
           }}
         >
-          {held ? "Update weight" : "Add to book"}
+          {held ? "Update Weight" : "Add to Portfolio"}
         </button>
       </div>
       {held ? (
@@ -321,7 +335,7 @@ export function StockSheet({
             onClose();
           }}
         >
-          Remove from book
+          Remove from Portfolio
         </button>
       ) : null}
       {canDrill ? (

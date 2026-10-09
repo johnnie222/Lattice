@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { marketClock, type Session } from "@/lib/format";
 import type { Quote } from "@/lib/quote-core";
 import { loadQuotes } from "@/lib/quote-source";
+import { useSettings } from "@/store/settings";
 
 const STORAGE = "lattice-quotes-v1";
 
@@ -14,8 +15,12 @@ const POLL_MS: Record<Session, number> = {
   holiday: 15 * 60_000,
 };
 
-export function pollInterval(session: Session): number {
-  return POLL_MS[session];
+/** Milliseconds until the next poll, or null when the user chose manual refresh. */
+export function pollInterval(session: Session): number | null {
+  const pref = useSettings.getState().refresh;
+  if (pref === "manual") return null;
+  if (pref === "auto") return POLL_MS[session];
+  return Number(pref) * 1000;
 }
 
 export function useQuotes(symbols: string[], refreshToken: number) {
@@ -87,7 +92,9 @@ export function useQuotes(symbols: string[], refreshToken: number) {
     const schedule = () => {
       window.clearTimeout(timer);
       if (cancel || document.visibilityState === "hidden") return;
-      const wait = Math.max(0, lastPull + pollInterval(marketClock().session) - Date.now());
+      const every = pollInterval(marketClock().session);
+      if (every == null) return;
+      const wait = Math.max(0, lastPull + every - Date.now());
       timer = window.setTimeout(() => {
         lastPull = Date.now();
         void load(false).finally(schedule);
@@ -101,10 +108,14 @@ export function useQuotes(symbols: string[], refreshToken: number) {
     lastPull = Date.now();
     void load(refreshToken > 0).finally(schedule);
     document.addEventListener("visibilitychange", onVisibility);
+    const unsubscribe = useSettings.subscribe((state, prev) => {
+      if (state.refresh !== prev.refresh) schedule();
+    });
     return () => {
       cancel = true;
       window.clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisibility);
+      unsubscribe();
     };
   }, [key, refreshToken]);
 
