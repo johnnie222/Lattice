@@ -1,0 +1,42 @@
+{
+  "url": "http://127.0.0.1:8081/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "S&P 500 · LATTICE",
+      "hasCanvas": false,
+      "bodyTextLen": 1272,
+      "bodyTextHash": "fd0d6ce8e4b5c9bf0d9b1305f0a1a98e531478fc8a188acd317915ba333e3ff0",
+      "bodyTextPrefix": "10:11:45 S&P 500 +0.33% US market · Open · 24 up · 14 down NVDA ",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "LATTICE",
+      "hasCanvas": false,
+      "bodyTextLen": 48,
+      "bodyTextHash": "a14092b97f429ef7d9c926f538535ffdaf6bfcf63d9cba492ebb25818c70d5f6",
+      "bodyTextPrefix": "--:--:-- S&P 500 Loading tape US market · Closed",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-built.json",
+  "divergesFromBaseline": true,
+  "baselineReasons": [
+    "desktop: body text replaced (similar length, page start changed)",
+    "mobile: title changed (\"S&P 500 · LATTICE\" -> \"LATTICE\")",
+    "mobile: body text collapsed (506 -> 48 chars)"
+  ]
+}

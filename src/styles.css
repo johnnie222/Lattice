@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #07080b;
+  --color-surface: #14161c;
+  --color-surface-2: #1c1f27;
+  --color-fg: #f4f5f7;
+  --color-ink: #f7f8f6;
+  --color-muted: #9aa3b2;
+  --color-line: #2a2e38;
+  --color-up: #1f9d55;
+  --color-down: #e23b55;
+  --color-heat-wait: #1a1f27;
+  --color-heat-flat: #173028;
+  --color-heat-up1: #0f6e3c;
+  --color-heat-up2: #12964a;
+  --color-heat-up3: #12b056;
+  --color-heat-up4: #00c462;
+  --color-heat-up5: #00e070;
+  --color-heat-dn1: #5c1c36;
+  --color-heat-dn2: #8e2444;
+  --color-heat-dn3: #c42b50;
+  --color-heat-dn4: #e23b62;
+  --color-heat-dn5: #ff4d78;
+  --font-sans: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-fg);
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  input {
+    font: inherit;
+  }
+}
+
+.tile-ink {
+  text-shadow: 0 1px 1px rgb(0 0 0 / 0.45);
+}
+
+.tile-selected {
+  box-shadow: inset 0 0 0 2px var(--color-fg);
+  z-index: 2;
+}
+
+.safe-t {
+  padding-top: max(0.35rem, env(safe-area-inset-top));
+}
+
+.safe-b {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+.scrim {
+  background: rgb(0 0 0 / 0.66);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet-panel {
+    transition: none;
+  }
+}

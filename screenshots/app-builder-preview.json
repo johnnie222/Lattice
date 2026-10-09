@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "S&P 500 · LATTICE",
+      "hasCanvas": false,
+      "bodyTextLen": 1272,
+      "bodyTextHash": "38a4e39c468fce82a2ec72dc3f26972ff7ed00f8b63970e3c11345a3f7b92487",
+      "bodyTextPrefix": "10:11:33 S&P 500 +0.33% US market · Open · 25 up · 14 down NVDA ",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "S&P 500 · LATTICE",
+      "hasCanvas": false,
+      "bodyTextLen": 506,
+      "bodyTextHash": "e66e88fa19cae7593f3f5316d51386e6271117d349a58083ee67bff57257862e",
+      "bodyTextPrefix": "10:11:34 S&P 500 +0.26% US market · Open · 102 up · 68 down NVDA",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}
