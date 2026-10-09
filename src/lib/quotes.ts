@@ -10,4 +10,4 @@ const serverGet: HttpGet = async (url, headers) => {
 
 export const fetchQuotes = createServerFn({ method: "POST" })
   .validator((input: unknown) => parseSymbols(input))
-  .handler(async ({ data }): Promise<QuoteResult> => getQuotes(serverGet, data.symbols, data.fresh));
+  .handler(async ({ data }): Promise<QuoteResult> => getQuotes(serverGet, data.symbols, data.fresh, data.period));

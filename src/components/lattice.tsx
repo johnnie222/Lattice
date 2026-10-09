@@ -20,6 +20,7 @@ import {
   type MapNode,
 } from "@/lib/market";
 import { useQuotes } from "@/lib/use-quotes";
+import { PERIODS, type Period } from "@/lib/quote-core";
 import { useApplyTheme } from "@/lib/theme";
 import { activeBook, useBooks } from "@/store/books";
 
@@ -63,6 +64,31 @@ function GlassButton({
   );
 }
 
+const PERIOD_LABEL: Record<Period, string> = { "1d": "1D", "1w": "1W", "1m": "1M" };
+const PERIOD_WORDS: Record<Period, string> = { "1d": "today", "1w": "past week", "1m": "past month" };
+
+function PeriodPicker({ value, onChange }: { value: Period; onChange: (period: Period) => void }) {
+  return (
+    <div role="radiogroup" aria-label="Time frame" className="glass flex shrink-0 rounded-full p-1">
+      {PERIODS.map((period) => {
+        const on = period === value;
+        return (
+          <button
+            key={period}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            onClick={() => onChange(period)}
+            className={`h-7 w-11 rounded-full text-[13px] font-semibold transition-colors ${on ? "bg-[var(--seg-thumb)] text-fg shadow-[0_1px_4px_rgb(0_0_0/0.25)]" : "text-muted"}`}
+          >
+            {PERIOD_LABEL[period]}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 const DEFAULT_BOARD = "spx";
 // Past this, quotes on screen are called out as delayed.
 const STALE_MS: Record<Session, number> = {
@@ -83,7 +109,7 @@ export function Lattice() {
   const drill = search.sector ?? null;
   const query = search.q ?? "";
   const setView = useCallback(
-    (next: { board?: string; sector?: SectorId | null; q?: string }) => {
+    (next: { board?: string; sector?: SectorId | null; q?: string; t?: Period }) => {
       void navigate({
         replace: true,
         search: (prev) => {
@@ -92,6 +118,7 @@ export function Lattice() {
             board: merged.board && merged.board !== DEFAULT_BOARD ? merged.board : undefined,
             sector: merged.sector ?? undefined,
             q: merged.q?.trim() ? merged.q : undefined,
+            t: merged.t && merged.t !== "1d" ? merged.t : undefined,
           };
         },
       });
@@ -100,6 +127,8 @@ export function Lattice() {
   );
   const setDrill = useCallback((sector: SectorId | null) => setView({ sector }), [setView]);
   const setQuery = useCallback((q: string) => setView({ q }), [setView]);
+  const period: Period = search.t ?? "1d";
+  const setPeriod = useCallback((t: Period) => setView({ t }), [setView]);
   const [filter, setFilter] = useState<FilterId>("all");
   const [searchOpen, setSearchOpen] = useState(Boolean(search.q));
   const [sheet, setSheet] = useState<SheetId | null>(null);
@@ -141,7 +170,7 @@ export function Lattice() {
     const list = [...rawNodes].sort((a, b) => b.weight - a.weight).map((node) => node.symbol);
     return bench ? [bench, ...list.filter((symbol) => symbol !== bench)] : list;
   }, [rawNodes, bench]);
-  const { quotes, asOf, status } = useQuotes(symbols, refreshToken);
+  const { quotes, asOf, status } = useQuotes(symbols, refreshToken, period);
   const priceWeighted = !bookMode && board.weighting === "price";
   const baseNodes = useMemo(
     () => (priceWeighted ? applyPriceWeights(rawNodes, quotes) : rawNodes),
@@ -223,15 +252,16 @@ export function Lattice() {
   const benchQuote = bench && !drill ? quotes[bench] : undefined;
   const headPct = benchQuote ? benchQuote.changePercent : move;
   const headUp = (headPct ?? 0) >= 0;
-  const caption = bookMode
-    ? "Your portfolio · today"
+  const baseCaption = bookMode
+    ? "Your portfolio"
     : drill
-      ? `${board.title} · ${sectorLabel(drill)} sector`
+      ? `${board.title} · ${sectorLabel(drill)}`
       : benchQuote
         ? board.group === "Index"
-          ? `${board.name === "US market" ? "S&P 500" : board.title} index`
-          : `${board.name} · fund price`
+          ? "Index"
+          : `${board.title} fund`
         : "Weighted move";
+  const caption = `${baseCaption} · ${PERIOD_WORDS[period]}`;
   const updated = asOfLabel
     ? stale
       ? `Delayed ${asOfLabel}`
@@ -322,19 +352,22 @@ export function Lattice() {
           </div>
         </div>
 
-        {quoted.length ? (
-          <div className="mt-2 px-1" aria-label={`${ups} advancing, ${downs} declining`}>
-            <div className="flex h-1 overflow-hidden rounded-full bg-line">
-              <span className="bg-up" style={{ width: `${(ups / quoted.length) * 100}%` }} />
-              <span className="bg-line" style={{ width: `${(flats / quoted.length) * 100}%` }} />
-              <span className="bg-down" style={{ width: `${(downs / quoted.length) * 100}%` }} />
+        <div className="mt-2.5 flex items-center gap-3 px-1">
+          <PeriodPicker value={period} onChange={setPeriod} />
+          {quoted.length ? (
+            <div className="min-w-0 flex-1" aria-label={`${ups} up, ${downs} down`}>
+              <div className="flex h-1 overflow-hidden rounded-full bg-line">
+                <span className="bg-up" style={{ width: `${(ups / quoted.length) * 100}%` }} />
+                <span className="bg-line" style={{ width: `${(flats / quoted.length) * 100}%` }} />
+                <span className="bg-down" style={{ width: `${(downs / quoted.length) * 100}%` }} />
+              </div>
+              <div className="tabular mt-1 flex justify-between text-[11px] font-medium text-muted">
+                <span>{ups} up</span>
+                <span>{downs} down</span>
+              </div>
             </div>
-            <div className="tabular mt-1 flex justify-between text-[11px] font-medium text-muted">
-              <span>{ups} advancing</span>
-              <span>{downs} declining</span>
-            </div>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
 
         {searchOpen ? (
           <div className="mt-2 flex items-center gap-2">
@@ -381,6 +414,7 @@ export function Lattice() {
           <Heatmap
             nodes={visible}
             quotes={quotes}
+            period={period}
             grouped={grouped}
             selected={sheet === "stock" ? selected : null}
             onSelect={onSelect}
@@ -438,6 +472,7 @@ export function Lattice() {
           key={selected}
           symbol={selected}
           quote={quotes[selected]}
+          periodWords={PERIOD_WORDS[period]}
           node={baseNodes.find((node) => node.symbol === selected) ?? visible.find((node) => node.symbol === selected)}
           book={book}
           canDrill={!bookMode && board.grouped && !drill}

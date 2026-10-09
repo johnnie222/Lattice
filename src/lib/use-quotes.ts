@@ -1,10 +1,15 @@
 import { useEffect, useState } from "react";
 import { marketClock, type Session } from "@/lib/format";
-import type { Quote } from "@/lib/quote-core";
+import type { Period, Quote } from "@/lib/quote-core";
 import { loadQuotes } from "@/lib/quote-source";
 import { useSettings } from "@/store/settings";
 
 const STORAGE = "lattice-quotes-v1";
+
+// One cache per window; the day keeps the original key.
+function storageKey(period: Period): string {
+  return period === "1d" ? STORAGE : `${STORAGE}:${period}`;
+}
 
 // Prices only move fast while the cash session is open.
 const POLL_MS: Record<Session, number> = {
@@ -23,7 +28,7 @@ export function pollInterval(session: Session): number | null {
   return Number(pref) * 1000;
 }
 
-export function useQuotes(symbols: string[], refreshToken: number) {
+export function useQuotes(symbols: string[], refreshToken: number, period: Period = "1d") {
   const key = symbols.filter(Boolean).join("|");
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [asOf, setAsOf] = useState<number | null>(null);
@@ -31,7 +36,9 @@ export function useQuotes(symbols: string[], refreshToken: number) {
 
   useEffect(() => {
     try {
-      const raw = sessionStorage.getItem(STORAGE);
+      setQuotes({});
+      setAsOf(null);
+      const raw = sessionStorage.getItem(storageKey(period));
       if (!raw) return;
       const parsed = JSON.parse(raw) as { at?: number; quotes?: Record<string, Quote> };
       if (!parsed.quotes || !parsed.at || Date.now() - parsed.at > 10 * 60_000) return;
@@ -40,7 +47,7 @@ export function useQuotes(symbols: string[], refreshToken: number) {
     } catch {
       /* ignore broken cache */
     }
-  }, []);
+  }, [period]);
 
   useEffect(() => {
     if (!key) {
@@ -52,13 +59,13 @@ export function useQuotes(symbols: string[], refreshToken: number) {
 
     const pull = async (batch: string[], fresh: boolean) => {
       if (!batch.length || cancel) return;
-      const res = await loadQuotes(batch, fresh);
+      const res = await loadQuotes(batch, fresh, period);
       if (cancel) return;
       setQuotes((prev) => {
         const next = { ...prev };
         for (const quote of res.quotes) next[quote.symbol] = quote;
         try {
-          sessionStorage.setItem(STORAGE, JSON.stringify({ at: res.asOf, quotes: next }));
+          sessionStorage.setItem(storageKey(period), JSON.stringify({ at: res.asOf, quotes: next }));
         } catch {
           /* quota */
         }
@@ -117,7 +124,7 @@ export function useQuotes(symbols: string[], refreshToken: number) {
       document.removeEventListener("visibilitychange", onVisibility);
       unsubscribe();
     };
-  }, [key, refreshToken]);
+  }, [key, refreshToken, period]);
 
   return { quotes, asOf, status };
 }

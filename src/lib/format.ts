@@ -159,18 +159,24 @@ export function formatAsOf(at: number, now = Date.now()): string {
   return `${date} ${time}`;
 }
 
-export function heatClass(pct: number | null): string {
+// A month moves far more than a day; stretch the scale so 1W/1M aren't all
+// fully saturated. Roughly sqrt(trading days), rounded.
+const HEAT_SCALE = { "1d": 1, "1w": 2, "1m": 4 } as const;
+
+export function heatClass(pct: number | null, period: keyof typeof HEAT_SCALE = "1d"): string {
   if (pct == null || Number.isNaN(pct)) return "heat-wait";
-  if (pct >= 4) return "heat-up5";
-  if (pct >= 2.5) return "heat-up4";
-  if (pct >= 1.25) return "heat-up3";
-  if (pct >= 0.4) return "heat-up2";
-  if (pct > 0.05) return "heat-up1";
-  if (pct >= -0.05) return "heat-flat";
-  if (pct > -0.4) return "heat-dn1";
-  if (pct > -1.25) return "heat-dn2";
-  if (pct > -2.5) return "heat-dn3";
-  if (pct > -4) return "heat-dn4";
+  const k = HEAT_SCALE[period];
+  const v = pct / k;
+  if (v >= 4) return "heat-up5";
+  if (v >= 2.5) return "heat-up4";
+  if (v >= 1.25) return "heat-up3";
+  if (v >= 0.4) return "heat-up2";
+  if (v > 0.05) return "heat-up1";
+  if (v >= -0.05) return "heat-flat";
+  if (v > -0.4) return "heat-dn1";
+  if (v > -1.25) return "heat-dn2";
+  if (v > -2.5) return "heat-dn3";
+  if (v > -4) return "heat-dn4";
   return "heat-dn5";
 }
 

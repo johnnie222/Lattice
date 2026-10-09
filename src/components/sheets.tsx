@@ -245,6 +245,7 @@ export function BoardSheet({
 export function StockSheet({
   symbol,
   quote,
+  periodWords,
   node,
   book,
   canDrill,
@@ -253,6 +254,7 @@ export function StockSheet({
 }: {
   symbol: string;
   quote: Quote | undefined;
+  periodWords: string;
   node: MapNode | undefined;
   book: Book;
   canDrill: boolean;
@@ -290,7 +292,14 @@ export function StockSheet({
         {quote ? formatPrice(quote.price) : "—"}
       </p>
       <p className={`mt-1 font-mono text-sm ${quote ? (up ? "text-up" : "text-down") : "text-muted"}`}>
-        {quote ? `${quote.change > 0 ? "+" : ""}${quote.change.toFixed(2)}  ${formatPct(quote.changePercent)}` : "Waiting on the tape"}
+        {quote ? (
+          <>
+            {`${quote.change > 0 ? "+" : ""}${quote.change.toFixed(2)}  ${formatPct(quote.changePercent)}`}
+            <span className="text-muted"> · {periodWords}</span>
+          </>
+        ) : (
+          "Waiting on the tape"
+        )}
       </p>
       <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
         <div>
