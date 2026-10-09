@@ -11,7 +11,7 @@ import {
   type FilterId,
   type MapNode,
 } from "@/lib/market";
-import type { Quote } from "@/lib/quotes";
+import type { Quote } from "@/lib/quote-core";
 import { activeBook, useBooks, type Book } from "@/store/books";
 import { Mark } from "@/components/mark";
 

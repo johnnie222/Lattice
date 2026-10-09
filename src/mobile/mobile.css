@@ -1,0 +1,3 @@
+/* Android build: root is mobile/, so point Tailwind at the app source. */
+@import "../styles.css";
+@source "..";

@@ -3,7 +3,7 @@ import { ChevronRight } from "lucide-react";
 import { sectorLabel, type SectorId } from "@/data/universe";
 import { formatPct, formatPrice, heatClass } from "@/lib/format";
 import type { MapNode } from "@/lib/market";
-import type { Quote } from "@/lib/quotes";
+import type { Quote } from "@/lib/quote-core";
 import { treemap, treemapGrouped, type TileRect } from "@/lib/treemap";
 import { Mark } from "@/components/mark";
 

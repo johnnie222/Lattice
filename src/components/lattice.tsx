@@ -185,7 +185,7 @@ export function Lattice() {
   const bookEmpty = bookMode && book.lines.filter((line) => line.weight > 0).length === 0;
 
   return (
-    <main className="flex h-dvh flex-col bg-bg text-fg">
+    <main className="flex h-dvh flex-col bg-bg pb-[env(safe-area-inset-bottom)] text-fg">
       <header className="safe-t shrink-0 px-2 pb-2">
         <div className="flex items-center gap-1">
           {drill ? (

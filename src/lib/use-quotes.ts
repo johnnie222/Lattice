@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { marketClock, type Session } from "@/lib/format";
-import { fetchQuotes, type Quote } from "@/lib/quotes";
+import type { Quote } from "@/lib/quote-core";
+import { loadQuotes } from "@/lib/quote-source";
 
 const STORAGE = "lattice-quotes-v1";
 
@@ -46,7 +47,7 @@ export function useQuotes(symbols: string[], refreshToken: number) {
 
     const pull = async (batch: string[], fresh: boolean) => {
       if (!batch.length || cancel) return;
-      const res = await fetchQuotes({ data: { symbols: batch, fresh } });
+      const res = await loadQuotes(batch, fresh);
       if (cancel) return;
       setQuotes((prev) => {
         const next = { ...prev };
