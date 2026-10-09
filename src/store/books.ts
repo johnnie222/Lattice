@@ -1,14 +1,30 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { normalizeSymbol } from "@/lib/market";
+import { todayNY } from "@/lib/format";
+
+type PositionBase = {
+  symbol: string;
+  /** Day it was added to Lattice (New York date). */
+  added: string;
+  /** Price when added; filled in from the first quote if unknown. */
+  anchor: number | null;
+};
 
 /**
- * A holding is either a real position (shares, optional entry price) or,
- * for people who'd rather not record amounts, a share of the portfolio.
+ * A holding is either a real position (shares, optional average cost and
+ * purchase date) or, for people who'd rather not record amounts, a share of
+ * the portfolio. A percent position is pinned to the price when it was added,
+ * so it grows and shrinks with the stock like a real holding would.
  */
 export type Position =
-  | { symbol: string; kind: "shares"; shares: number; entry: number | null }
-  | { symbol: string; kind: "percent"; percent: number };
+  | (PositionBase & { kind: "shares"; shares: number; entry: number | null; since: string | null })
+  | (PositionBase & { kind: "percent"; percent: number });
+
+/** Which kind of position a portfolio holds; null while it's empty. */
+export function bookKind(book: Book, except?: string): Position["kind"] | null {
+  return book.positions.find((p) => p.symbol !== except)?.kind ?? null;
+}
 
 export type Book = {
   id: string;
@@ -24,6 +40,7 @@ type BooksState = {
   newBook: () => void;
   removeActive: () => void;
   savePosition: (position: Position) => void;
+  setAnchors: (prices: Record<string, number>) => void;
   removePosition: (symbol: string) => void;
 };
 
@@ -33,16 +50,21 @@ function patchActive(books: Book[], activeId: string, edit: (book: Book) => Book
   return books.map((book) => (book.id === activeId ? edit(book) : book));
 }
 
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 function clean(position: Position): Position | null {
   const symbol = normalizeSymbol(position.symbol);
   if (!symbol) return null;
+  const added = DATE.test(position.added) ? position.added : todayNY();
+  const anchor = position.anchor != null && Number.isFinite(position.anchor) && position.anchor > 0 ? position.anchor : null;
   if (position.kind === "shares") {
     if (!Number.isFinite(position.shares) || position.shares <= 0) return null;
     const entry = position.entry != null && Number.isFinite(position.entry) && position.entry > 0 ? position.entry : null;
-    return { symbol, kind: "shares", shares: position.shares, entry };
+    const since = position.since && DATE.test(position.since) && position.since <= todayNY() ? position.since : null;
+    return { symbol, added, anchor, kind: "shares", shares: position.shares, entry, since };
   }
   if (!Number.isFinite(position.percent) || position.percent <= 0) return null;
-  return { symbol, kind: "percent", percent: Math.min(100, position.percent) };
+  return { symbol, added, anchor, kind: "percent", percent: Math.min(100, position.percent) };
 }
 
 export const useBooks = create<BooksState>()(
@@ -87,6 +109,20 @@ export const useBooks = create<BooksState>()(
           }),
         });
       },
+      // Record the price a position started from, once a quote is in.
+      setAnchors: (prices) => {
+        let changed = false;
+        const books = get().books.map((book) => ({
+          ...book,
+          positions: book.positions.map((p) => {
+            const price = prices[p.symbol];
+            if (p.anchor != null || !price) return p;
+            changed = true;
+            return { ...p, anchor: price };
+          }),
+        }));
+        if (changed) set({ books });
+      },
       removePosition: (symbol) =>
         set({
           books: patchActive(get().books, get().activeId, (book) => ({
@@ -97,9 +133,10 @@ export const useBooks = create<BooksState>()(
     }),
     {
       name: "lattice-books-v1",
-      version: 2,
+      version: 3,
       // v1 stored { lines: [{ symbol, weight }], notional }. Weights become
       // "% of portfolio" positions so nothing a user entered is lost.
+      // v3 adds added/anchor (and since for shares) to every position.
       migrate: (persisted, version) => {
         const state = persisted as { books?: unknown[]; activeId?: string };
         if (version < 2 && Array.isArray(state.books)) {
@@ -113,6 +150,18 @@ export const useBooks = create<BooksState>()(
                 .map((line) => ({ symbol: line.symbol, kind: "percent", percent: line.weight })),
             };
           });
+        }
+        if (version < 3 && Array.isArray(state.books)) {
+          const today = todayNY();
+          state.books = (state.books as Book[]).map((book) => ({
+            ...book,
+            positions: book.positions.map((p) => ({
+              ...p,
+              added: (p as Partial<Position>).added ?? today,
+              anchor: (p as Partial<Position>).anchor ?? null,
+              ...(p.kind === "shares" ? { since: (p as { since?: string | null }).since ?? null } : {}),
+            })) as Position[],
+          }));
         }
         return state as BooksState;
       },

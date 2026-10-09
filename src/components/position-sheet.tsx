@@ -3,9 +3,9 @@ import { Search } from "lucide-react";
 import { ListGroup, ListRow, Sheet } from "@/components/sheets";
 import { Segmented } from "@/components/chrome";
 import { Mark } from "@/components/mark";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, todayNY } from "@/lib/format";
 import { findListing, normalizeSymbol, suggestListings, syntheticListing } from "@/lib/market";
-import { activeBook, useBooks } from "@/store/books";
+import { activeBook, bookKind, useBooks } from "@/store/books";
 
 type Mode = "shares" | "percent";
 
@@ -25,6 +25,7 @@ function Field({
   onChange,
   placeholder,
   suffix,
+  type = "decimal",
 }: {
   id: string;
   label: string;
@@ -32,17 +33,20 @@ function Field({
   onChange: (value: string) => void;
   placeholder?: string;
   suffix?: string;
+  type?: "decimal" | "date";
 }) {
   return (
     <label htmlFor={id} className="flex min-h-12 items-center gap-3 px-4">
       <span className="flex-1 text-[15px]">{label}</span>
       <input
         id={id}
-        inputMode="decimal"
+        type={type === "date" ? "date" : "text"}
+        max={type === "date" ? todayNY() : undefined}
+        inputMode={type === "date" ? undefined : "decimal"}
         value={value}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
-        className="tabular w-32 bg-transparent text-right text-[15px] outline-none placeholder:text-muted/70"
+        className="tabular w-36 bg-transparent text-right text-[15px] outline-none placeholder:text-muted/70 [color-scheme:inherit]"
       />
       {suffix ? <span className="text-[15px] text-muted">{suffix}</span> : null}
     </label>
@@ -71,9 +75,12 @@ export function PositionSheet({
   const [symbol, setSymbol] = useState<string | null>(initial ? normalizeSymbol(initial) : null);
   const [draft, setDraft] = useState("");
   const existing = symbol ? book.positions.find((p) => p.symbol === symbol) : undefined;
-  const [mode, setMode] = useState<Mode>(existing?.kind ?? "shares");
+  // A portfolio holds one kind of position; mixing makes "25% of what?" ambiguous.
+  const locked = bookKind(book, symbol ?? undefined);
+  const [mode, setMode] = useState<Mode>(existing?.kind ?? locked ?? "shares");
   const [shares, setShares] = useState(existing?.kind === "shares" ? String(existing.shares) : "");
   const [entry, setEntry] = useState(existing?.kind === "shares" && existing.entry != null ? String(existing.entry) : "");
+  const [since, setSince] = useState(existing?.kind === "shares" ? (existing.since ?? "") : "");
   const [percent, setPercent] = useState(existing?.kind === "percent" ? String(existing.percent) : "");
 
   const ideas = useMemo(() => suggestListings(draft, 6), [draft]);
@@ -92,10 +99,16 @@ export function PositionSheet({
 
   const save = () => {
     if (!valid || !symbol) return;
+    const base = {
+      symbol,
+      added: existing?.added ?? todayNY(),
+      // Keep the original starting price when editing, so returns don't reset.
+      anchor: existing?.anchor ?? price ?? null,
+    };
     savePosition(
       mode === "shares"
-        ? { symbol, kind: "shares", shares: sharesN, entry: entryN }
-        : { symbol, kind: "percent", percent: percentN },
+        ? { ...base, kind: "shares", shares: sharesN, entry: entryN, since: since || null }
+        : { ...base, kind: "percent", percent: percentN },
     );
     onClose();
   };
@@ -156,16 +169,20 @@ export function PositionSheet({
               <p className="truncate text-sm text-muted">{listing?.name !== symbol ? listing?.name : " "}</p>
             </div>
           </div>
-          <div className="mb-4">
-            <Segmented label="Position type" value={mode} options={MODES} onChange={setMode} compact />
-          </div>
+          {locked && !existing?.kind ? (
+            <p className="mb-4 px-1 text-[13px] leading-relaxed text-muted">
+              {locked === "shares"
+                ? "This portfolio tracks shares. For percentage-only tracking, start a new portfolio."
+                : "This portfolio tracks percentages. To record shares, start a new portfolio."}
+            </p>
+          ) : locked ? null : (
+            <div className="mb-4">
+              <Segmented label="Position type" value={mode} options={MODES} onChange={setMode} compact />
+            </div>
+          )}
           {mode === "shares" ? (
             <ListGroup
-              footer={
-                preview != null
-                  ? `Worth about ${formatMoney(preview)} at ${price ? "today's price" : "your cost"}. Average cost is optional and only used for your total gain.`
-                  : "Average cost is optional and only used for your total gain."
-              }
+              footer={`${preview != null ? `Worth about ${formatMoney(preview)} at ${price ? "today's price" : "your cost"}. ` : ""}Average cost and purchase date are optional. With a date, any window that starts before it counts from your purchase price.`}
             >
               <Field id="shares" label="Shares" value={shares} onChange={setShares} placeholder="10" />
               <Field
@@ -176,10 +193,11 @@ export function PositionSheet({
                 placeholder={price ? price.toFixed(2) : "Optional"}
                 suffix="$"
               />
+              <Field id="since" label="Purchase date" value={since} onChange={setSince} type="date" />
             </ListGroup>
           ) : (
-            <ListGroup footer="No amounts are stored. The tile is sized as this share of your portfolio, and returns are shown in % only.">
-              <Field id="percent" label="Share of portfolio" value={percent} onChange={setPercent} placeholder="10" suffix="%" />
+            <ListGroup footer="No amounts are stored. The position starts at this share of your portfolio, then grows or shrinks with its price, like a real holding. Returns are shown in % only.">
+              <Field id="percent" label="Starting share" value={percent} onChange={setPercent} placeholder="10" suffix="%" />
             </ListGroup>
           )}
           <button

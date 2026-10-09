@@ -1,15 +1,16 @@
-import { useMemo, useState, type CSSProperties } from "react";
-import { ChevronDown, LayoutGrid, Plus, Settings } from "lucide-react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { ChevronDown, Plus, Settings } from "lucide-react";
 import { GlassButton, LargeTitle, Segmented } from "@/components/chrome";
 import { InfoSheet, ListGroup, ListRow, Sheet } from "@/components/sheets";
 import { SettingsSheet } from "@/components/settings-sheet";
 import { PositionSheet } from "@/components/position-sheet";
 import { Mark } from "@/components/mark";
-import { formatAsOf, formatMoney, formatPct } from "@/lib/format";
-import { findListing, syntheticListing } from "@/lib/market";
+import { Heatmap } from "@/components/heatmap";
+import { formatAsOf, formatDay, formatMoney, formatPct } from "@/lib/format";
+import { findListing, syntheticListing, type MapNode } from "@/lib/market";
+import type { Quote } from "@/lib/quote-core";
 import { periodChange, valueBook, type PortfolioPeriod } from "@/lib/portfolio";
 import { useQuotes } from "@/lib/use-quotes";
-import { useView } from "@/lib/use-view";
 import { activeBook, useBooks } from "@/store/books";
 
 const OPTIONS: { id: PortfolioPeriod; label: string }[] = [
@@ -31,6 +32,12 @@ const WORDS: Record<PortfolioPeriod, string> = {
   "5y": "past 5 years",
   all: "since purchase",
 };
+
+type Layout = "map" | "list";
+const LAYOUTS: { id: Layout; label: string }[] = [
+  { id: "map", label: "Map" },
+  { id: "list", label: "List" },
+];
 
 function tone(n: number | null | undefined): string {
   if (n == null) return "text-muted";
@@ -100,11 +107,12 @@ function PortfoliosSheet({ onClose }: { onClose: () => void }) {
  * included) and gain since purchase when an average cost was given.
  */
 export function PortfolioView() {
-  const { setView } = useView();
   const books = useBooks((s) => s.books);
   const activeId = useBooks((s) => s.activeId);
   const book = activeBook({ books, activeId });
   const [period, setPeriod] = useState<PortfolioPeriod>("1d");
+  const [layout, setLayout] = useState<Layout>("map");
+  const setAnchors = useBooks((s) => s.setAnchors);
   const [sheet, setSheet] = useState<"settings" | "info" | "portfolios" | "position" | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
@@ -118,7 +126,34 @@ export function PortfolioView() {
   const valuation = useMemo(() => valueBook(book, live.quotes), [book, live.quotes]);
   const change = useMemo(() => periodChange(valuation, changeQuotes, period), [valuation, changeQuotes, period]);
   const total = change.total;
-  const hasCost = book.positions.some((p) => p.kind === "shares" && p.entry != null);
+  const hasBase = book.positions.some((p) => p.anchor != null || (p.kind === "shares" && p.entry != null));
+
+  // Positions added before a quote was in (or migrated) start from the first price seen.
+  useEffect(() => {
+    const missing = book.positions.filter((p) => p.anchor == null && live.quotes[p.symbol]);
+    if (missing.length) setAnchors(Object.fromEntries(missing.map((p) => [p.symbol, live.quotes[p.symbol]!.price])));
+  }, [book.positions, live.quotes, setAnchors]);
+
+  // The map colors each tile by its change over the chosen window.
+  const mapNodes = useMemo(
+    (): MapNode[] =>
+      valuation.holdings
+        .filter((h) => h.weight > 0)
+        .map((h) => {
+          const listing = findListing(h.symbol) ?? syntheticListing(h.symbol);
+          return { symbol: h.symbol, name: listing.name, sector: listing.sector, industry: listing.industry, cap: listing.cap, weight: h.weight };
+        }),
+    [valuation],
+  );
+  const mapQuotes = useMemo(() => {
+    const out: Record<string, Quote> = {};
+    for (const h of valuation.holdings) {
+      const row = change.rows.get(h.symbol);
+      if (row?.pct == null || h.price == null) continue;
+      out[h.symbol] = { symbol: h.symbol, price: h.price, change: 0, changePercent: row.pct };
+    }
+    return out;
+  }, [valuation, change]);
   const mood = total.pct == null ? "transparent" : total.pct >= 0 ? "var(--up-text)" : "var(--dn-text)";
 
   const openPosition = (symbol: string | null) => {
@@ -182,8 +217,8 @@ export function PortfolioView() {
                 {valuation.total != null ? formatMoney(valuation.total) : total.pct != null ? formatPct(total.pct) : "—"}
               </p>
               <p className={`tabular mt-0.5 text-[15px] font-semibold ${tone(total.pct)}`}>
-                {period === "all" && !hasCost ? (
-                  <span className="font-normal text-muted">Add an average cost to see your gain since purchase</span>
+                {period === "all" && !hasBase ? (
+                  <span className="font-normal text-muted">Waiting for prices to start tracking</span>
                 ) : total.pct == null ? (
                   <span className="font-normal text-muted">Loading…</span>
                 ) : (
@@ -197,19 +232,39 @@ export function PortfolioView() {
               <div className="mt-3">
                 <Segmented label="Time frame" value={period} options={OPTIONS} onChange={setPeriod} compact />
               </div>
-              {valuation.overflow ? (
-                <p className="mt-3 text-xs text-down">
-                  Your percentage positions add up to 100% or more, so they can’t be combined with share positions.
+              {valuation.mixed ? (
+                <p className="mt-3 text-xs leading-relaxed text-muted">
+                  This portfolio mixes shares and percentages, which older versions allowed. Percentages are read as a
+                  share of the total{valuation.overflow ? ", but they add up to 100% or more" : ""}. For accurate
+                  tracking, keep one kind per portfolio.
                 </p>
               ) : null}
             </section>
 
+            <div className="mb-3 flex items-center justify-between px-1">
+              <h3 className="text-[13px] font-medium uppercase tracking-wide text-muted">
+                {book.positions.length} {book.positions.length === 1 ? "position" : "positions"}
+              </h3>
+              <Segmented label="Layout" value={layout} options={LAYOUTS} onChange={setLayout} />
+            </div>
+            {layout === "map" ? (
+              <div className="relative h-[max(320px,calc(100dvh-420px))]">
+                <Heatmap
+                  nodes={mapNodes}
+                  quotes={mapQuotes}
+                  period={period === "all" ? "1y" : period}
+                  grouped={false}
+                  selected={null}
+                  onSelect={(symbol) => openPosition(symbol)}
+                  onDrill={() => undefined}
+                />
+              </div>
+            ) : (
             <ListGroup
-              title="Positions"
               footer={
-                period === "ytd" || period === "1y" || period === "5y"
-                  ? "Longer windows assume you held the same positions the whole time."
-                  : undefined
+                period === "all"
+                  ? "Since purchase uses your average cost, or the price when you added the position."
+                  : "Positions with a purchase date inside this window count from your purchase price. Others use the market's move over the window."
               }
             >
               {valuation.holdings.map((h) => {
@@ -219,7 +274,7 @@ export function PortfolioView() {
                 const subtitle =
                   p.kind === "shares"
                     ? `${p.shares.toLocaleString("en-US")} ${p.shares === 1 ? "share" : "shares"}${p.entry != null ? ` · avg ${formatMoney(p.entry)}` : ""}`
-                    : `${p.percent}% of portfolio`;
+                    : `${p.percent}% at start · now ${(h.share * 100).toFixed(1)}%`;
                 return (
                   <ListRow
                     key={h.symbol}
@@ -241,6 +296,9 @@ export function PortfolioView() {
                             ? `${row.dollars != null ? `${formatMoney(row.dollars, true)} · ` : ""}${formatPct(row.pct)}`
                             : "—"}
                         </span>
+                        {row?.sincePurchase && p.kind === "shares" && p.since ? (
+                          <span className="text-[11px] text-muted">since {formatDay(p.since)}</span>
+                        ) : null}
                       </span>
                     }
                     onClick={() => openPosition(h.symbol)}
@@ -248,21 +306,7 @@ export function PortfolioView() {
                 );
               })}
             </ListGroup>
-
-            <ListGroup>
-              <ListRow
-                leading={<LayoutGrid className="size-5 text-accent" />}
-                title="View as Heatmap"
-                chevron
-                onClick={() => setView({ tab: "map", board: "book", sector: null })}
-              />
-              <ListRow
-                leading={<Plus className="size-5 text-accent" />}
-                title="Add Position"
-                chevron
-                onClick={() => openPosition(null)}
-              />
-            </ListGroup>
+            )}
           </>
         )}
       </div>

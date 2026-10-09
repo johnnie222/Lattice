@@ -67,63 +67,28 @@ function Tile({
   const radius = Math.max(2, Math.min(12, short * 0.09));
   const pct = quote ? formatPct(quote.changePercent, w < 70 ? 1 : 2) : null;
 
-  // Large tiles get the Apple card layout: logo top-left, figures bottom-left.
-  const card = w >= 104 && h >= 96;
-  if (card) {
-    const pad = Math.max(8, Math.min(14, short * 0.08));
-    const logo = Math.max(24, Math.min(44, short * 0.24));
-    const tickerSize = fitSize(node.symbol, w - pad * 2 + 8, Math.min(30, h * 0.17));
-    const showPrice = Boolean(quote) && h >= 128;
-    return (
-      <button
-        type="button"
-        aria-label={`${node.symbol} ${node.name}${quote ? ` ${formatPrice(quote.price)} ${formatPct(quote.changePercent)}` : ""}`}
-        onClick={() => onSelect(node.symbol)}
-        className={`tile absolute flex flex-col justify-between overflow-hidden text-left ${heatClass(quote?.changePercent ?? null, period)} ${selected ? "tile-selected" : ""}`}
-        style={{ left: rect.x + GAP, top: rect.y + GAP, width: w, height: h, borderRadius: radius, padding: pad }}
-      >
-        <Mark symbol={node.symbol} size={logo} onTile />
-        <span className="flex min-w-0 flex-col">
-          <span className="truncate font-semibold leading-none tracking-tight" style={{ fontSize: tickerSize }}>
-            {node.symbol}
-          </span>
-          {pct ? (
-            <span
-              className="tabular mt-1 font-medium leading-none"
-              style={{ fontSize: Math.max(12, Math.min(20, tickerSize * 0.62)) }}
-            >
-              {pct}
-            </span>
-          ) : null}
-          {showPrice && quote ? (
-            <span
-              className="tabular mt-1 leading-none opacity-75"
-              style={{ fontSize: Math.max(11, Math.min(14, tickerSize * 0.46)) }}
-            >
-              {formatPrice(quote.price)}
-            </span>
-          ) : null}
-        </span>
-      </button>
-    );
-  }
-
+  // One centred layout for every tile, scaled to its size: logo, ticker,
+  // change, and the price when there's room.
   const wide = w > h * 1.65 && h < 64;
   const showPct = Boolean(quote) && w >= 38 && h >= (wide ? 22 : 34);
-  // In the wide layout the % shares the row, so the ticker gets ~55% of it.
-  const tickerSize = fitSize(node.symbol, wide && showPct ? w * 0.55 : w, Math.min(20, Math.max(h, 12) * 0.32));
+  const tickerSize = fitSize(
+    node.symbol,
+    wide && showPct ? w * 0.55 : w,
+    Math.min(30, Math.max(12, Math.min(h * 0.32, short * 0.24))),
+  );
   const showTicker = tickerSize >= 8;
-  const pctSize = pct ? Math.max(8, fitSize(pct, wide ? w * 0.45 : w, Math.min(14, tickerSize * 0.8))) : 0;
-  // Medium tiles get a smaller logo above the ticker when there's height for it.
-  const logoSize = Math.max(20, Math.min(30, short * 0.3));
-  const logo =
-    !wide && showTicker && w >= 60 && h >= logoSize + tickerSize + (showPct ? pctSize + 4 : 0) + 22 ? logoSize : 0;
+  const pctSize = pct ? Math.max(8, fitSize(pct, wide ? w * 0.45 : w, Math.min(18, tickerSize * 0.72))) : 0;
+  const logoSize = Math.max(20, Math.min(48, short * 0.26));
+  const stack = tickerSize + (showPct ? pctSize + 4 : 0);
+  const logo = !wide && showTicker && w >= 60 && h >= logoSize + stack + 22 ? logoSize : 0;
+  const priceSize = Math.max(11, Math.min(14, tickerSize * 0.48));
+  const showPrice = Boolean(quote) && !wide && w >= 72 && h >= logo + stack + priceSize + 34;
 
   return (
     <button
       type="button"
       tabIndex={w >= 64 && h >= 48 ? 0 : -1}
-      aria-label={`${node.symbol}${quote ? ` ${formatPrice(quote.price)} ${formatPct(quote.changePercent)}` : ""}`}
+      aria-label={`${node.symbol}${node.name !== node.symbol ? ` ${node.name}` : ""}${quote ? ` ${formatPrice(quote.price)} ${formatPct(quote.changePercent)}` : ""}`}
       onClick={() => onSelect(node.symbol)}
       className={`tile absolute overflow-hidden ${heatClass(quote?.changePercent ?? null, period)} ${selected ? "tile-selected" : ""}`}
       style={{ left: rect.x + GAP, top: rect.y + GAP, width: w, height: h, borderRadius: radius }}
@@ -132,7 +97,7 @@ function Tile({
         className={`flex h-full w-full items-center justify-center px-1 ${wide ? "flex-row gap-1.5" : "flex-col gap-0.5"}`}
       >
         {logo ? (
-          <span className="mb-1">
+          <span className="mb-1.5">
             <Mark symbol={node.symbol} size={logo} onTile />
           </span>
         ) : null}
@@ -142,8 +107,13 @@ function Tile({
           </span>
         ) : null}
         {showPct && pct && pctSize >= 8 ? (
-          <span className="tabular font-medium leading-none opacity-90" style={{ fontSize: pctSize }}>
+          <span className="tabular mt-0.5 font-medium leading-none opacity-90" style={{ fontSize: pctSize }}>
             {pct}
+          </span>
+        ) : null}
+        {showPrice && quote ? (
+          <span className="tabular mt-1 leading-none opacity-70" style={{ fontSize: priceSize }}>
+            {formatPrice(quote.price)}
           </span>
         ) : null}
       </span>

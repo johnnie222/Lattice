@@ -398,8 +398,8 @@ export function MapView() {
             setSheet(null);
           }}
           onBook={() => {
-            setView({ board: "book", sector: null });
             setSheet(null);
+            setView({ tab: "portfolio" });
           }}
           onInfo={() => setSheet("info")}
           onClose={() => setSheet(null)}

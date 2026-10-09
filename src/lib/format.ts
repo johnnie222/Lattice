@@ -193,3 +193,21 @@ export function formatMoney(n: number, signed = false): string {
   if (!signed) return n < 0 ? `-${body}` : body;
   return `${n > 0 ? "+" : n < 0 ? "−" : ""}${body}`;
 }
+
+/** Today's date in New York as YYYY-MM-DD (the market's calendar day). */
+export function todayNY(now = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(now);
+}
+
+/** "2026-10-03" → "Oct 3" (adds the year when it isn't this year). */
+export function formatDay(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const date = new Date(Date.UTC(y!, m! - 1, d!));
+  const sameYear = iso.slice(0, 4) === todayNY().slice(0, 4);
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+  }).format(date);
+}
