@@ -32,7 +32,7 @@ export type Board = {
   name: string;
   group: "Index" | "Sector ETF" | "Thematic";
   grouped: boolean;
-  weighting: "cap" | "equal" | "custom";
+  weighting: "cap" | "equal" | "custom" | "price";
   index?: "sp" | "ndx" | "dow";
   sector?: SectorId;
   lines?: BoardLine[];
@@ -6237,7 +6237,7 @@ export const BOARDS = [
     "name": "DJIA",
     "group": "Index",
     "grouped": false,
-    "weighting": "cap",
+    "weighting": "price",
     "index": "dow"
   },
   {

@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { ChevronDown, ChevronLeft, Filter, Search } from "lucide-react";
-import { sectorLabel, type SectorId } from "@/data/universe";
+import { BOARDS, sectorLabel, type SectorId } from "@/data/universe";
 import { Heatmap } from "@/components/heatmap";
 import { BoardSheet, BookSheet, FilterSheet, InfoSheet, StockSheet, type SheetId } from "@/components/sheets";
-import { formatPct, marketClock, sessionLabel, type Session } from "@/lib/format";
+import { formatAsOf, formatPct, marketClock, sessionLabel, type Session } from "@/lib/format";
 import {
+  applyPriceWeights,
   boardById,
   boardNodes,
   findListing,
@@ -23,12 +25,44 @@ function formatDollars(n: number): string {
   return `${sign}$${Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 }
 
+const DEFAULT_BOARD = "spx";
+// Past this, quotes on screen are called out as delayed.
+const STALE_MS: Record<Session, number> = {
+  open: 3 * 60_000,
+  pre: 6 * 60_000,
+  post: 6 * 60_000,
+  closed: Infinity,
+  holiday: Infinity,
+};
+
 export function Lattice() {
-  const [boardId, setBoardId] = useState("spx");
-  const [drill, setDrill] = useState<SectorId | null>(null);
+  // Board, sector drill and search live in the URL so a view can be shared.
+  const search = useSearch({ from: "/" });
+  const navigate = useNavigate({ from: "/" });
+  const boardId =
+    search.board === "book" || BOARDS.some((b) => b.id === search.board) ? search.board! : DEFAULT_BOARD;
+  const drill = search.sector ?? null;
+  const query = search.q ?? "";
+  const setView = useCallback(
+    (next: { board?: string; sector?: SectorId | null; q?: string }) => {
+      void navigate({
+        replace: true,
+        search: (prev) => {
+          const merged = { ...prev, ...next };
+          return {
+            board: merged.board && merged.board !== DEFAULT_BOARD ? merged.board : undefined,
+            sector: merged.sector ?? undefined,
+            q: merged.q?.trim() ? merged.q : undefined,
+          };
+        },
+      });
+    },
+    [navigate],
+  );
+  const setDrill = useCallback((sector: SectorId | null) => setView({ sector }), [setView]);
+  const setQuery = useCallback((q: string) => setView({ q }), [setView]);
   const [filter, setFilter] = useState<FilterId>("all");
-  const [query, setQuery] = useState("");
-  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(Boolean(search.q));
   const [sheet, setSheet] = useState<SheetId | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
@@ -41,7 +75,7 @@ export function Lattice() {
   const board = boardById(boardId);
   const bookMode = boardId === "book";
 
-  const baseNodes = useMemo(() => {
+  const rawNodes = useMemo(() => {
     if (bookMode) {
       return book.lines
         .filter((line) => line.weight > 0)
@@ -60,11 +94,18 @@ export function Lattice() {
     return boardNodes(board);
   }, [bookMode, book.lines, board]);
 
+  // Symbols come from the quote-independent nodes so price weighting can't
+  // change the fetch key and restart polling.
   const symbols = useMemo(
-    () => [...baseNodes].sort((a, b) => b.weight - a.weight).map((node) => node.symbol),
-    [baseNodes],
+    () => [...rawNodes].sort((a, b) => b.weight - a.weight).map((node) => node.symbol),
+    [rawNodes],
   );
-  const { quotes, status } = useQuotes(symbols, refreshToken);
+  const { quotes, asOf, status } = useQuotes(symbols, refreshToken);
+  const priceWeighted = !bookMode && board.weighting === "price";
+  const baseNodes = useMemo(
+    () => (priceWeighted ? applyPriceWeights(rawNodes, quotes) : rawNodes),
+    [priceWeighted, rawNodes, quotes],
+  );
 
   const visible = useMemo(() => {
     return baseNodes.filter((node) => {
@@ -120,19 +161,25 @@ export function Lattice() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sheet, drill, searchOpen]);
+  }, [sheet, drill, searchOpen, setDrill]);
 
   const onSelect = useCallback((symbol: string) => {
     setSelected(symbol);
     setSheet("stock");
   }, []);
 
-  const onDrill = useCallback((sector: SectorId) => {
-    setDrill(sector);
-    setSheet(null);
-  }, []);
+  const onDrill = useCallback(
+    (sector: SectorId) => {
+      setDrill(sector);
+      setSheet(null);
+    },
+    [setDrill],
+  );
 
   const session = clock?.session ?? "closed";
+  const now = Date.now();
+  const stale = asOf != null && (status === "error" || now - asOf > STALE_MS[session]);
+  const asOfLabel = asOf != null ? formatAsOf(asOf, now) : null;
   const pnl = bookMode && book.notional && move != null ? (book.notional * move) / 100 : null;
   const showMap = visible.length > 0;
   const bookEmpty = bookMode && book.lines.filter((line) => line.weight > 0).length === 0;
@@ -204,6 +251,11 @@ export function Lattice() {
           {subtitle ? `${subtitle} · ` : ""}
           {sessionLabel(session)}
           {quoted.length ? ` · ${ups} up · ${downs} down` : ""}
+          {asOfLabel ? (
+            <span className={stale ? "text-down" : undefined}>
+              {stale ? ` · Delayed, as of ${asOfLabel}` : ` · as of ${asOfLabel}`}
+            </span>
+          ) : null}
           {bookMode ? (
             <>
               {" · "}
@@ -278,13 +330,11 @@ export function Lattice() {
           bookName={book.name}
           bookCount={book.lines.length}
           onPick={(id) => {
-            setBoardId(id);
-            setDrill(null);
+            setView({ board: id, sector: null });
             setSheet(null);
           }}
           onBook={() => {
-            setBoardId("book");
-            setDrill(null);
+            setView({ board: "book", sector: null });
             setSheet(null);
           }}
           onInfo={() => setSheet("info")}

@@ -109,9 +109,10 @@ export function InfoSheet({ onClose }: { onClose: () => void }) {
           strong up day. Rose is the same scale on the downside.
         </p>
         <p>
-          <span className="text-fg">Size is weight.</span> On the S&P 500, Nasdaq 100, Dow, and the sector
-          ETFs (XLK, XLF, XLE, and the rest), tile area is market cap. That is close to how the SPDR sector
-          funds look, not a copy of the official daily basket file.
+          <span className="text-fg">Size is weight.</span> On the S&P 500, Nasdaq 100, and the sector ETFs
+          (XLK, XLF, XLE, and the rest), tile area is market cap. That is close to how the SPDR sector funds
+          look, not a copy of the official daily basket file. The Dow is price-weighted, like the real index:
+          tile area is each stock’s share price.
         </p>
         <p>
           <span className="text-fg">Thematic baskets are approximate.</span> SOXX, SMH, IGV, and KRE use a

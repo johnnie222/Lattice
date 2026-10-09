@@ -18,8 +18,28 @@ type Props = {
 
 const GAP = 1.5;
 
+let measureCtx: CanvasRenderingContext2D | null | undefined;
+
+// Width of `text` at 1px in the tile's semibold sans, measured once per string.
+const emWidth = new Map<string, number>();
+function textEm(text: string): number {
+  const hit = emWidth.get(text);
+  if (hit) return hit;
+  if (measureCtx === undefined && typeof document !== "undefined") {
+    measureCtx = document.createElement("canvas").getContext("2d");
+  }
+  let em = text.length * 0.68;
+  if (measureCtx) {
+    measureCtx.font = '600 100px "IBM Plex Sans", "Segoe UI", sans-serif';
+    em = measureCtx.measureText(text).width / 100;
+  }
+  if (typeof document !== "undefined" && document.fonts?.status === "loaded") emWidth.set(text, em);
+  return em;
+}
+
 function fitSize(text: string, width: number, preferred: number): number {
-  const cap = Math.floor((width - 8) / Math.max(text.length, 1) / 0.62);
+  // px-1 padding plus a little slack so truncate never kicks in.
+  const cap = Math.floor((width - 10) / Math.max(textEm(text), 0.5));
   return Math.max(0, Math.min(preferred, cap));
 }
 
@@ -45,7 +65,7 @@ function Tile({
   const showPct = Boolean(quote) && w >= 40 && h >= 36;
   const tickerPreferred = showLogo ? Math.min(26, h * 0.16) : Math.min(22, Math.max(h, 12) * 0.34);
   const tickerSize = fitSize(node.symbol, w, tickerPreferred);
-  const showTicker = tickerSize >= 9;
+  const showTicker = tickerSize >= 8;
   const priceSize = Math.max(10, Math.min(16, tickerSize * 0.72));
   const pctSize = Math.max(10, Math.min(15, showPrice ? priceSize : tickerSize * 0.86));
   const logo = Math.max(28, Math.min(64, Math.min(w * 0.42, h * 0.28)));
@@ -93,6 +113,18 @@ export const Heatmap = memo(function Heatmap({
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
+  const [, setFontsReady] = useState(false);
+
+  // Ticker sizing measures text, so re-fit once the web font has arrived.
+  useEffect(() => {
+    let live = true;
+    void document.fonts?.ready.then(() => {
+      if (live) setFontsReady(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   useEffect(() => {
     const el = ref.current;

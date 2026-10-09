@@ -99,8 +99,26 @@ export function boardNodes(board: Board): MapNode[] {
     sector: listing.sector,
     industry: listing.industry,
     cap: listing.cap,
-    weight: sizedCap(listing.symbol, listing.cap),
+    weight: board.weighting === "price" ? 1 : sizedCap(listing.symbol, listing.cap),
   }));
+}
+
+// Price-weighted boards (the Dow) size each name by its previous close. That
+// makes weightedChange equal sum(change) / sum(prevClose), i.e. the index's own
+// percent move. Names without a quote yet borrow the average so nothing jumps.
+export function applyPriceWeights(
+  nodes: MapNode[],
+  quotes: Record<string, { price: number; change: number }>,
+): MapNode[] {
+  const prev = new Map<string, number>();
+  for (const node of nodes) {
+    const quote = quotes[node.symbol];
+    const close = quote ? quote.price - quote.change : NaN;
+    if (Number.isFinite(close) && close > 0) prev.set(node.symbol, close);
+  }
+  if (!prev.size) return nodes.map((node) => ({ ...node, weight: 1 }));
+  const avg = [...prev.values()].reduce((sum, v) => sum + v, 0) / prev.size;
+  return nodes.map((node) => ({ ...node, weight: prev.get(node.symbol) ?? avg }));
 }
 
 export type FilterId = "all" | "up" | "down" | "m1" | "m2";

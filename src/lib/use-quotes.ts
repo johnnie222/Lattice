@@ -1,7 +1,21 @@
 import { useEffect, useState } from "react";
+import { marketClock, type Session } from "@/lib/format";
 import { fetchQuotes, type Quote } from "@/lib/quotes";
 
 const STORAGE = "lattice-quotes-v1";
+
+// Prices only move fast while the cash session is open.
+const POLL_MS: Record<Session, number> = {
+  open: 45_000,
+  pre: 120_000,
+  post: 120_000,
+  closed: 15 * 60_000,
+  holiday: 15 * 60_000,
+};
+
+export function pollInterval(session: Session): number {
+  return POLL_MS[session];
+}
 
 export function useQuotes(symbols: string[], refreshToken: number) {
   const key = symbols.filter(Boolean).join("|");
@@ -65,11 +79,31 @@ export function useQuotes(symbols: string[], refreshToken: number) {
       if (!cancel && !any && failed) setStatus("error");
     };
 
-    void load(refreshToken > 0);
-    const timer = window.setInterval(() => void load(false), 45_000);
+    // Poll on a timer that adapts to the session, and stop entirely while the
+    // tab is hidden. Coming back to a stale tab refreshes right away.
+    let timer: number | undefined;
+    let lastPull = 0;
+    const schedule = () => {
+      window.clearTimeout(timer);
+      if (cancel || document.visibilityState === "hidden") return;
+      const wait = Math.max(0, lastPull + pollInterval(marketClock().session) - Date.now());
+      timer = window.setTimeout(() => {
+        lastPull = Date.now();
+        void load(false).finally(schedule);
+      }, wait);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") schedule();
+      else window.clearTimeout(timer);
+    };
+
+    lastPull = Date.now();
+    void load(refreshToken > 0).finally(schedule);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       cancel = true;
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [key, refreshToken]);
 
