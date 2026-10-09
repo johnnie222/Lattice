@@ -12,12 +12,25 @@ export type Quote = {
 export type QuoteResult = { quotes: Quote[]; asOf: number };
 
 /** The window a quote's change covers. */
-export type Period = "1d" | "1w" | "1m";
+export type Period = "1d" | "1w" | "1m" | "ytd" | "1y" | "5y";
+/** The windows the map and sector ranking offer. */
 export const PERIODS: Period[] = ["1d", "1w", "1m"];
+const ALL_PERIODS = new Set<string>(["1d", "1w", "1m", "ytd", "1y", "5y"]);
 
 export function parsePeriod(raw: unknown): Period {
-  return raw === "1w" || raw === "1m" ? raw : "1d";
+  return typeof raw === "string" && ALL_PERIODS.has(raw) ? (raw as Period) : "1d";
 }
+
+// Yahoo range + bar size per window. Only the last close and the close
+// before the range matter, so long windows use coarse bars.
+const RANGE: Record<Period, { range: string; interval: string }> = {
+  "1d": { range: "1d", interval: "1d" },
+  "1w": { range: "1mo", interval: "1d" },
+  "1m": { range: "1mo", interval: "1d" },
+  ytd: { range: "ytd", interval: "1d" },
+  "1y": { range: "1y", interval: "1wk" },
+  "5y": { range: "5y", interval: "1mo" },
+};
 
 export type HttpGet = (url: string, headers: Record<string, string>) => Promise<{ status: number; data: unknown }>;
 
@@ -25,7 +38,14 @@ type CacheEntry = { at: number; q: Quote };
 
 const cache = new Map<string, CacheEntry>();
 // Week/month changes only move with today's price, so they can be cached longer.
-const TTL_MS: Record<Period, number> = { "1d": 20_000, "1w": 60_000, "1m": 60_000 };
+const TTL_MS: Record<Period, number> = {
+  "1d": 20_000,
+  "1w": 60_000,
+  "1m": 60_000,
+  ytd: 120_000,
+  "1y": 120_000,
+  "5y": 300_000,
+};
 const CHUNK = 20;
 
 export function parseSymbols(input: unknown): { symbols: string[]; fresh: boolean; period: Period } {
@@ -51,9 +71,9 @@ function finite(values: unknown): number[] {
 }
 
 /**
- * Change over a window from daily closes. The last close is today's live
- * price. 1W compares with the close five sessions back; 1M with the close
- * just before the one-month range starts (Yahoo's chartPreviousClose).
+ * Change over a window from closes. The last close is today's live price.
+ * 1W compares with the close five sessions back; longer windows with the
+ * close just before the range starts (Yahoo's chartPreviousClose).
  */
 function windowQuote(symbol: string, closes: number[], previousClose: number, period: Period): Quote | null {
   const price = closes[closes.length - 1];
@@ -103,8 +123,8 @@ function readRows(data: Record<string, unknown>, symbols: string[]) {
 }
 
 async function fetchChunk(get: HttpGet, symbols: string[], period: Period): Promise<Quote[]> {
-  const range = period === "1d" ? "1d" : "1mo";
-  const url = `https://query2.finance.yahoo.com/v8/finance/spark?symbols=${symbols.map(encodeURIComponent).join(",")}&range=${range}&interval=1d`;
+  const { range, interval } = RANGE[period];
+  const url = `https://query2.finance.yahoo.com/v8/finance/spark?symbols=${symbols.map(encodeURIComponent).join(",")}&range=${range}&interval=${interval}`;
   let last = "quote failed";
   for (let attempt = 0; attempt < 3; attempt++) {
     const res = await get(url, {

@@ -114,6 +114,10 @@ function Tile({
   const tickerSize = fitSize(node.symbol, wide && showPct ? w * 0.55 : w, Math.min(20, Math.max(h, 12) * 0.32));
   const showTicker = tickerSize >= 8;
   const pctSize = pct ? Math.max(8, fitSize(pct, wide ? w * 0.45 : w, Math.min(14, tickerSize * 0.8))) : 0;
+  // Medium tiles get a smaller logo above the ticker when there's height for it.
+  const logoSize = Math.max(20, Math.min(30, short * 0.3));
+  const logo =
+    !wide && showTicker && w >= 60 && h >= logoSize + tickerSize + (showPct ? pctSize + 4 : 0) + 22 ? logoSize : 0;
 
   return (
     <button
@@ -127,6 +131,11 @@ function Tile({
       <span
         className={`flex h-full w-full items-center justify-center px-1 ${wide ? "flex-row gap-1.5" : "flex-col gap-0.5"}`}
       >
+        {logo ? (
+          <span className="mb-1">
+            <Mark symbol={node.symbol} size={logo} onTile />
+          </span>
+        ) : null}
         {showTicker ? (
           <span className="max-w-full truncate font-semibold leading-none tracking-tight" style={{ fontSize: tickerSize }}>
             {node.symbol}

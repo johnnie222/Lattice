@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { ListGroup, ListRow, Sheet } from "@/components/sheets";
 import { formatAsOf } from "@/lib/format";
-import { useBooks } from "@/store/books";
+import { EMPTY_BOOK, useBooks } from "@/store/books";
 import { useSettings, type PaletteId, type RefreshPref, type ThemePref } from "@/store/settings";
 
 function Segmented<T extends string>({
@@ -95,7 +95,7 @@ export function SettingsSheet({
   }, [confirmReset]);
 
   const resetAll = () => {
-    useBooks.setState({ books: [{ id: "main", name: "Main", lines: [], notional: null }], activeId: "main" });
+    useBooks.setState({ books: [EMPTY_BOOK], activeId: "main" });
     useSettings.setState({ theme: "system", palette: "classic", refresh: "auto" });
     try {
       sessionStorage.removeItem("lattice-quotes-v1");

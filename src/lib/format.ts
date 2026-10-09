@@ -161,7 +161,7 @@ export function formatAsOf(at: number, now = Date.now()): string {
 
 // A month moves far more than a day; stretch the scale so 1W/1M aren't all
 // fully saturated. Roughly sqrt(trading days), rounded.
-const HEAT_SCALE = { "1d": 1, "1w": 2, "1m": 4 } as const;
+const HEAT_SCALE = { "1d": 1, "1w": 2, "1m": 4, ytd: 7, "1y": 8, "5y": 16 } as const;
 
 export function heatClass(pct: number | null, period: keyof typeof HEAT_SCALE = "1d"): string {
   if (pct == null || Number.isNaN(pct)) return "heat-wait";
@@ -184,4 +184,12 @@ export function heatClass(pct: number | null, period: keyof typeof HEAT_SCALE = 
 export function formatLevel(n: number): string {
   if (!Number.isFinite(n)) return "—";
   return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** 1234.5 → "$1,234.50"; signed adds +/−. */
+export function formatMoney(n: number, signed = false): string {
+  if (!Number.isFinite(n)) return "—";
+  const body = Math.abs(n).toLocaleString("en-US", { style: "currency", currency: "USD" });
+  if (!signed) return n < 0 ? `-${body}` : body;
+  return `${n > 0 ? "+" : n < 0 ? "−" : ""}${body}`;
 }

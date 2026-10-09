@@ -65,7 +65,14 @@ export function useQuotes(symbols: string[], refreshToken: number, period: Perio
         const next = { ...prev };
         for (const quote of res.quotes) next[quote.symbol] = quote;
         try {
-          sessionStorage.setItem(storageKey(period), JSON.stringify({ at: res.asOf, quotes: next }));
+          // Other tabs keep their own symbols in the same cache; merge, don't replace.
+          const stored = JSON.parse(sessionStorage.getItem(storageKey(period)) ?? "{}") as {
+            quotes?: Record<string, Quote>;
+          };
+          sessionStorage.setItem(
+            storageKey(period),
+            JSON.stringify({ at: res.asOf, quotes: { ...stored.quotes, ...next } }),
+          );
         } catch {
           /* quota */
         }

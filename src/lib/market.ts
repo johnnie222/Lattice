@@ -36,13 +36,63 @@ export function findListing(symbol: string): Listing | undefined {
   return BY_SYMBOL.get(normalizeSymbol(symbol));
 }
 
+// Common funds people hold, so a portfolio shows "Invesco QQQ" rather than a
+// bare ticker. They aren't index members, so they live outside LISTINGS.
+const FUND_NAMES: Record<string, string> = {
+  SPY: "SPDR S&P 500 ETF",
+  VOO: "Vanguard S&P 500 ETF",
+  IVV: "iShares Core S&P 500 ETF",
+  VTI: "Vanguard Total Stock Market ETF",
+  QQQ: "Invesco QQQ Trust",
+  QQQM: "Invesco Nasdaq 100 ETF",
+  DIA: "SPDR Dow Jones Industrial ETF",
+  IWM: "iShares Russell 2000 ETF",
+  VT: "Vanguard Total World Stock ETF",
+  VXUS: "Vanguard Total International ETF",
+  VEA: "Vanguard Developed Markets ETF",
+  VWO: "Vanguard Emerging Markets ETF",
+  EFA: "iShares MSCI EAFE ETF",
+  EEM: "iShares MSCI Emerging Markets ETF",
+  SCHD: "Schwab US Dividend Equity ETF",
+  VIG: "Vanguard Dividend Appreciation ETF",
+  VYM: "Vanguard High Dividend Yield ETF",
+  VUG: "Vanguard Growth ETF",
+  VTV: "Vanguard Value ETF",
+  BND: "Vanguard Total Bond Market ETF",
+  AGG: "iShares Core US Aggregate Bond ETF",
+  TLT: "iShares 20+ Year Treasury ETF",
+  GLD: "SPDR Gold Shares",
+  SLV: "iShares Silver Trust",
+  ARKK: "ARK Innovation ETF",
+  XLK: "Technology Select Sector SPDR",
+  XLF: "Financial Select Sector SPDR",
+  XLE: "Energy Select Sector SPDR",
+  XLV: "Health Care Select Sector SPDR",
+  XLY: "Consumer Discretionary SPDR",
+  XLP: "Consumer Staples SPDR",
+  XLI: "Industrial Select Sector SPDR",
+  XLB: "Materials Select Sector SPDR",
+  XLRE: "Real Estate Select Sector SPDR",
+  XLU: "Utilities Select Sector SPDR",
+  XLC: "Communication Services SPDR",
+  SOXX: "iShares Semiconductor ETF",
+  SMH: "VanEck Semiconductor ETF",
+  IGV: "iShares Expanded Tech-Software ETF",
+  XBI: "SPDR S&P Biotech ETF",
+  IBB: "iShares Biotechnology ETF",
+  KRE: "SPDR S&P Regional Banking ETF",
+  XRT: "SPDR S&P Retail ETF",
+  ITA: "iShares US Aerospace & Defense ETF",
+};
+
 export function syntheticListing(symbol: string): Listing {
   const normalized = normalizeSymbol(symbol);
+  const fund = FUND_NAMES[normalized];
   return {
     symbol: normalized,
-    name: normalized,
+    name: fund ?? normalized,
     sector: "other",
-    industry: "",
+    industry: fund ? "ETF" : "",
     cap: 0,
     sp: false,
     ndx: false,
@@ -166,6 +216,13 @@ export function suggestListings(query: string, limit = 6): Listing[] {
     else if (symbol.includes(q) || name.includes(q)) rest.push(listing);
     if (starts.length >= limit) break;
   }
+  // Funds aren't index members; offer them too so QQQ or VOO can be added by name.
+  for (const [symbol, name] of Object.entries(FUND_NAMES)) {
+    if (starts.length + rest.length >= limit * 2) break;
+    const s = symbol.toLowerCase();
+    if (s.startsWith(q)) starts.unshift(syntheticListing(symbol));
+    else if (name.toLowerCase().includes(q)) rest.push(syntheticListing(symbol));
+  }
   return [...starts, ...rest].slice(0, limit);
 }
 
@@ -174,4 +231,11 @@ const INDEX_SYMBOL: Record<string, string> = { spx: "^GSPC", ndx: "^NDX", dow: "
 /** The quote shown in the header banner: the real index, or the fund itself. */
 export function benchmarkSymbol(board: Board): string {
   return INDEX_SYMBOL[board.id] ?? board.title;
+}
+
+// Short names for the title bar; long ones get cut off next to the buttons.
+const SHORT_TITLE: Record<string, string> = { ndx: "NASDAQ" };
+
+export function boardTitle(board: Board): string {
+  return SHORT_TITLE[board.id] ?? board.title;
 }
