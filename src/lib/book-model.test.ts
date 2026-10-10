@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { formatShares } from "./format.ts";
 import { isLegacyBook, migrateBooks, suggestQuantities } from "./book-model.ts";
 
 describe("migrateBooks", () => {
@@ -126,4 +127,78 @@ describe("suggestQuantities", () => {
     });
     assert.deepEqual(suggestQuantities([{ symbol: "AAA", weight: 1 }], 1000, {}), { AAA: null });
   });
+});
+
+describe("safe legacy conversion", () => {
+  it("keeps zero-weight tickers accessible and requires an explicit decision for each", async () => {
+    const { convertLegacyBook } = await import("./book-model.ts");
+    const book = migrateBooks(
+      {
+        books: [
+          {
+            id: "b",
+            name: "B",
+            lines: [
+              { symbol: "AAA", weight: 0 },
+              { symbol: "BBB", weight: 100 },
+            ],
+            notional: 1000,
+          },
+        ],
+      },
+      0,
+    ).books[0]!;
+    assert.equal(isLegacyBook(book), true);
+    assert.equal(
+      convertLegacyBook(book, [{ symbol: "BBB", quantity: 1, averageCost: null }]),
+      book,
+    );
+    assert.equal(
+      convertLegacyBook(book, [
+        { symbol: "AAA", quantity: 0, averageCost: null },
+        { symbol: "BBB", quantity: 1, averageCost: null },
+      ]),
+      book,
+    );
+    const holdings = [
+      { symbol: "AAA", quantity: 0.000012345, averageCost: null },
+      { symbol: "BBB", quantity: 1.25, averageCost: 50 },
+    ];
+    const converted = convertLegacyBook(book, holdings);
+    assert.deepEqual(converted.holdings, holdings);
+    assert.deepEqual(converted.lines, []);
+    assert.deepEqual(migrateBooks({ books: [converted] }, 1).books[0], converted);
+    assert.equal(
+      convertLegacyBook(converted, [{ symbol: "AAA", quantity: 9, averageCost: null }]),
+      converted,
+    );
+  });
+
+  it("preserves holdings even when a snapshot has a missing/old version tag", () => {
+    const book = {
+      id: "b",
+      name: "B",
+      holdings: [{ symbol: "AAA", quantity: 0.25, averageCost: 100 }],
+      lines: [],
+      notional: null,
+    };
+    assert.deepEqual(migrateBooks({ books: [book] }, 0).books[0], book);
+  });
+
+  it("repairs same-version legacy snapshots without hiding their saved lines", () => {
+    const state = migrateBooks(
+      {
+        books: [{ id: "b", name: "B", lines: [{ symbol: "AAA", weight: 0 }], notional: 1234 }],
+        activeId: "b",
+      },
+      1,
+    );
+    assert.equal(isLegacyBook(state.books[0]!), true);
+    assert.equal(state.books[0]!.notional, 1234);
+    assert.deepEqual(migrateBooks(state, 1), state);
+  });
+});
+
+it("shows tiny fractional holdings without rounding them to zero", () => {
+  assert.equal(formatShares(0.000012345), "0.000012345");
 });

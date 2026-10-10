@@ -1,16 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 
-export type Quote = {
-  symbol: string;
-  price: number;
-  change: number;
-  changePercent: number;
-  /**
-   * Last session's close, or null when the feed didn't provide enough to know
-   * it. Portfolio math needs this; it must not be guessed from a missing change.
-   */
-  previousClose: number | null;
-};
+import { parseQuote, type Quote } from "./quote-data.ts";
+export type { Quote } from "./quote-data.ts";
 
 type CacheEntry = { at: number; q: Quote };
 
@@ -59,26 +50,8 @@ async function fetchChunk(symbols: string[]): Promise<Quote[]> {
     }
     const out: Quote[] = [];
     for (const symbol of symbols) {
-      const row = data[symbol];
-      if (!row || typeof row !== "object") continue;
-      const rec = row as Record<string, unknown>;
-      const price = Number(rec.fulldayPrice);
-      const change = Number(rec.fulldayChange);
-      const changePercent = Number(rec.fulldayChangePercent);
-      if (!Number.isFinite(price)) continue;
-      const reportedClose = Number(rec.chartPreviousClose ?? rec.previousClose);
-      const previousClose = Number.isFinite(change)
-        ? price - change
-        : Number.isFinite(reportedClose) && reportedClose > 0
-          ? reportedClose
-          : null;
-      out.push({
-        symbol,
-        price,
-        change: Number.isFinite(change) ? change : 0,
-        changePercent: Number.isFinite(changePercent) ? changePercent : 0,
-        previousClose: previousClose != null && previousClose > 0 ? previousClose : null,
-      });
+      const quote = parseQuote(symbol, data[symbol]);
+      if (quote) out.push(quote);
     }
     return out;
   }

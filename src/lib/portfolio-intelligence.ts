@@ -340,7 +340,7 @@ export type PortfolioLine = {
 };
 
 export type PortfolioMove = {
-  changePercent: number;
+  changePercent: number | null;
 };
 
 export type PortfolioPositionAnalysis = {

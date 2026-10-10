@@ -3,8 +3,8 @@ export function formatPrice(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
-export function formatPct(n: number, digits = 2): string {
-  if (!Number.isFinite(n)) return "—";
+export function formatPct(n: number | null, digits = 2): string {
+  if (n == null || !Number.isFinite(n)) return "—";
   const sign = n > 0 ? "+" : "";
   return `${sign}${n.toFixed(digits)}%`;
 }
@@ -182,10 +182,10 @@ export function formatMoney(n: number, signed = false): string {
   return n < 0 ? `−${body}` : body;
 }
 
-/** Share counts keep up to 4 decimals for fractional holdings: 0.375, 12. */
+/** Keep small fractional holdings visible instead of rounding them to zero. */
 export function formatShares(n: number): string {
   if (!Number.isFinite(n)) return "—";
-  return n.toLocaleString("en-US", { maximumFractionDigits: 4 });
+  return n.toLocaleString("en-US", { maximumSignificantDigits: 12 });
 }
 
 /** Percentage-point difference: +0.80 pts. */

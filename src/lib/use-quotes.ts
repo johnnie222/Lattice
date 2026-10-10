@@ -2,7 +2,10 @@ import { useEffect, useState } from "react";
 import { marketClock, type Session } from "@/lib/format";
 import { fetchQuotes, type Quote } from "@/lib/quotes";
 
-const STORAGE = "lattice-quotes-v1";
+import { replaceQuoteBatch } from "./quote-data.ts";
+
+// v1 cached synthetic zero moves and did not carry previousClose.
+const STORAGE = "lattice-quotes-v2";
 
 // Prices only move fast while the cash session is open.
 const POLL_MS: Record<Session, number> = {
@@ -17,7 +20,7 @@ export function pollInterval(session: Session): number {
   return POLL_MS[session];
 }
 
-export function useQuotes(symbols: string[], refreshToken: number) {
+export function useQuotes(symbols: string[], refreshToken: number, waitForAll = false) {
   const key = symbols.filter(Boolean).join("|");
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [asOf, setAsOf] = useState<number | null>(null);
@@ -44,39 +47,39 @@ export function useQuotes(symbols: string[], refreshToken: number) {
     const list = key.split("|");
     let cancel = false;
 
-    const pull = async (batch: string[], fresh: boolean) => {
-      if (!batch.length || cancel) return;
-      const res = await fetchQuotes({ data: { symbols: batch, fresh } });
-      if (cancel) return;
-      setQuotes((prev) => {
-        const next = { ...prev };
-        for (const quote of res.quotes) next[quote.symbol] = quote;
-        try {
-          sessionStorage.setItem(STORAGE, JSON.stringify({ at: res.asOf, quotes: next }));
-        } catch {
-          /* quota */
-        }
-        return next;
-      });
-      setAsOf(res.asOf);
-      setStatus("live");
-    };
-
     const load = async (fresh: boolean) => {
       setStatus((current) => (current === "live" ? "live" : "loading"));
       const batches = [list.slice(0, 40), list.slice(40, 180), list.slice(180)];
-      let any = false;
+      const received: Quote[] = [];
+      let at: number | null = null;
       let failed = false;
       for (const batch of batches) {
         if (cancel || !batch.length) continue;
         try {
-          await pull(batch, fresh && !any);
-          any = true;
+          const res = await fetchQuotes({ data: { symbols: batch, fresh } });
+          received.push(...res.quotes);
+          at = res.asOf;
+          // Market maps retain progressive rendering; portfolio totals wait
+          // for every batch so fresh and old sessions cannot be mixed.
+          if (!cancel && !waitForAll) {
+            setQuotes((previous) => replaceQuoteBatch(previous, batch, res.quotes));
+          }
         } catch {
           failed = true;
         }
       }
-      if (!cancel && !any && failed) setStatus("error");
+      if (cancel) return;
+      // Commit one refresh atomically: never mix a new benchmark with old
+      // holdings from another batch, and remove missing/failed batch quotes.
+      const next = replaceQuoteBatch({}, list, received);
+      setQuotes(next);
+      setAsOf(at);
+      setStatus(failed || !received.length ? "error" : "live");
+      try {
+        sessionStorage.setItem(STORAGE, JSON.stringify({ at, quotes: next }));
+      } catch {
+        /* quota */
+      }
     };
 
     // Poll on a timer that adapts to the session, and stop entirely while the
@@ -105,7 +108,7 @@ export function useQuotes(symbols: string[], refreshToken: number) {
       window.clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [key, refreshToken]);
+  }, [key, refreshToken, waitForAll]);
 
   return { quotes, asOf, status };
 }

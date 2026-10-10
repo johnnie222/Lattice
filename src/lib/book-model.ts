@@ -39,7 +39,7 @@ export function emptyBook(id: string, name: string): Book {
 
 /** A book that still uses weights and hasn't been converted to holdings. */
 export function isLegacyBook(book: Book): boolean {
-  return book.holdings.length === 0 && book.lines.some((line) => line.weight > 0);
+  return book.holdings.length === 0 && book.lines.length > 0;
 }
 
 function positive(value: unknown): value is number {
@@ -58,7 +58,7 @@ function symbolOf(raw: unknown): string {
  */
 export function migrateBooks(
   persisted: unknown,
-  version: number,
+  _version: number,
 ): { books: Book[]; activeId: string } {
   const state = (persisted && typeof persisted === "object" ? persisted : {}) as {
     books?: unknown;
@@ -78,7 +78,7 @@ export function migrateBooks(
         : [];
     });
     const holdings =
-      version >= 1 && Array.isArray(book.holdings)
+      Array.isArray(book.holdings)
         ? book.holdings.flatMap((holding) => {
             const h = holding as Record<string, unknown>;
             const symbol = symbolOf(h?.symbol);
@@ -101,6 +101,16 @@ export function migrateBooks(
       ? state.activeId
       : books[0]!.id;
   return { books, activeId };
+}
+
+/** Conversion is all-or-nothing, including saved zero-weight tickers. */
+export function convertLegacyBook(book: Book, holdings: HoldingLine[]): Book {
+  if (!isLegacyBook(book) || !holdings.length) return book;
+  if (holdings.some((holding) => !positive(holding.quantity))) return book;
+  const symbols = new Set(holdings.map((holding) => holding.symbol));
+  if (symbols.size !== holdings.length || book.lines.some((line) => !symbols.has(line.symbol)))
+    return book;
+  return { ...book, holdings, lines: [], notional: null };
 }
 
 /**

@@ -284,8 +284,8 @@ export function StockSheet({
       <p className="mt-4 font-mono text-3xl font-medium tracking-tight">
         {quote ? formatPrice(quote.price) : "—"}
       </p>
-      <p className={`mt-1 font-mono text-sm ${quote ? (up ? "text-up" : "text-down") : "text-muted"}`}>
-        {quote ? `${quote.change > 0 ? "+" : ""}${quote.change.toFixed(2)}  ${formatPct(quote.changePercent)}` : "Waiting on the tape"}
+      <p className={`mt-1 font-mono text-sm ${quote?.change != null ? (up ? "text-up" : "text-down") : "text-muted"}`}>
+        {quote?.change != null ? `${quote.change > 0 ? "+" : ""}${quote.change.toFixed(2)}  ${formatPct(quote.changePercent)}` : "Waiting on the tape"}
       </p>
       <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
         <div>
@@ -415,7 +415,12 @@ function HoldingRow({ symbol, quantity, averageCost }: { symbol: string; quantit
         key={`${symbol}-c-${averageCost}`}
         onBlur={(event) => {
           const raw = event.target.value.trim();
-          saveHolding({ symbol, quantity, averageCost: raw ? parseAmount(raw) : null });
+          const next = raw ? parseAmount(raw) : null;
+          if (raw && next == null) {
+            event.target.value = averageCost != null ? String(averageCost) : "";
+            return;
+          }
+          saveHolding({ symbol, quantity, averageCost: next });
         }}
         className="h-11 w-20 rounded-xl border border-line bg-bg px-2 text-right font-mono"
       />
@@ -439,7 +444,7 @@ function HoldingRow({ symbol, quantity, averageCost }: { symbol: string; quantit
 function LegacyConversion({ book, quotes }: { book: Book; quotes: Record<string, Quote> }) {
   const convertLegacy = useBooks((s) => s.convertLegacy);
   const removeLegacyLine = useBooks((s) => s.removeLegacyLine);
-  const lines = book.lines.filter((line) => line.weight > 0);
+  const lines = book.lines;
   const [draft, setDraft] = useState<Record<string, string>>({});
   const suggestions = useMemo(
     () =>
@@ -470,7 +475,7 @@ function LegacyConversion({ book, quotes }: { book: Book; quotes: Record<string,
             setDraft((prev) => {
               const next = { ...prev };
               for (const [symbol, value] of Object.entries(suggestions)) {
-                if (value != null && !next[symbol]) next[symbol] = String(Math.round(value * 10_000) / 10_000);
+                if (value != null && !next[symbol]) next[symbol] = String(value);
               }
               return next;
             })
@@ -574,7 +579,7 @@ export function BookSheet({ quotes, onClose }: { quotes: Record<string, Quote>; 
       />
       <div className="mt-4">
         {legacy ? (
-          <LegacyConversion book={book} quotes={quotes} />
+          <LegacyConversion key={book.id} book={book} quotes={quotes} />
         ) : (
           <>
             {book.holdings.length ? (

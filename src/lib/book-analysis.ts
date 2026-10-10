@@ -34,7 +34,7 @@ export function benchmarkReturn(
   quotes: Readonly<Record<string, Quote | undefined>>,
 ): number | null {
   const quote = quotes[BENCHMARK_SYMBOL];
-  if (!quote || !quote.previousClose || !(quote.price > 0)) return null;
+  if (!quote || quote.previousClose == null || !Number.isFinite(quote.previousClose) || quote.previousClose <= 0 || !Number.isFinite(quote.price) || quote.price <= 0) return null;
   return (quote.price / quote.previousClose - 1) * 100;
 }
 

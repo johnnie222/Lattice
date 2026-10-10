@@ -98,7 +98,7 @@ export function Lattice() {
     const list = [...rawNodes].sort((a, b) => b.weight - a.weight).map((node) => node.symbol);
     return bookMode ? [...list, BENCHMARK_SYMBOL] : list;
   }, [rawNodes, bookMode]);
-  const { quotes, asOf, status } = useQuotes(symbols, refreshToken);
+  const { quotes, asOf, status } = useQuotes(symbols, refreshToken, bookMode);
   const priceWeighted = !bookMode && board.weighting === "price";
   const bookResult = useMemo(() => (bookMode ? analyzeBook(book, quotes) : null), [bookMode, book, quotes]);
   const baseNodes = useMemo(() => {

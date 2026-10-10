@@ -4,6 +4,8 @@ import { normalizeSymbol } from "@/lib/market";
 import {
   BOOKS_VERSION,
   emptyBook,
+  isLegacyBook,
+  convertLegacyBook,
   migrateBooks,
   type Book,
   type HoldingLine,
@@ -76,6 +78,7 @@ export const useBooks = create<BooksState>()(
         if (!holding) return;
         set({
           books: patchActive(get().books, get().activeId, (book) => {
+            if (isLegacyBook(book)) return book;
             const exists = book.holdings.some((h) => h.symbol === holding.symbol);
             return {
               ...book,
@@ -102,14 +105,9 @@ export const useBooks = create<BooksState>()(
         }),
       convertLegacy: (holdings) => {
         const clean = holdings.map(cleanHolding).filter((h): h is HoldingLine => h != null);
-        if (!clean.length) return;
+        if (!clean.length || clean.length !== holdings.length) return;
         set({
-          books: patchActive(get().books, get().activeId, (book) => ({
-            ...book,
-            holdings: clean,
-            lines: [],
-            notional: null,
-          })),
+          books: patchActive(get().books, get().activeId, (book) => convertLegacyBook(book, clean)),
         });
       },
     }),
@@ -117,6 +115,9 @@ export const useBooks = create<BooksState>()(
       name: "lattice-books-v1",
       version: BOOKS_VERSION,
       migrate: (persisted, version) => migrateBooks(persisted, version) as unknown as BooksState,
+      // Zustand skips migrate for matching or absent version tags. Repair
+      // those snapshots too, while preserving the live action functions.
+      merge: (persisted, current) => ({ ...current, ...migrateBooks(persisted, BOOKS_VERSION) }),
     },
   ),
 );
