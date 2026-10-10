@@ -106,7 +106,8 @@ export type PeriodMove = { percent: number | null; covered: number; total: numbe
  * The header move for a lookback: a weighted average over the names that have
  * a reference close, with coverage so a partial figure can be labelled as one.
  * Price-weighted boards weight by the reference close, which makes the result
- * sum(price − ref) / sum(ref), the index's own lookback move.
+ * sum(price − ref) / sum(ref), a current-constituent basket move. This is
+ * not an official index return: divisor and corporate-action changes matter.
  */
 export function periodMove(
   nodes: readonly { symbol: string; weight: number }[],

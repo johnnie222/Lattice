@@ -28,7 +28,7 @@ export interface HistoryProvider {
   dailyCloses(symbols: readonly string[], from: string): Promise<HistoryBatch>;
 }
 
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
+import { isCalendarDate } from "./market-calendar.ts";
 
 /**
  * Enforce the DailyBar contract on provider output: valid dates, positive
@@ -37,7 +37,7 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/;
 export function normalizeBars(bars: readonly { date: unknown; close: unknown }[]): DailyBar[] {
   const byDate = new Map<string, number>();
   for (const bar of bars) {
-    if (typeof bar.date !== "string" || !DATE.test(bar.date)) continue;
+    if (typeof bar.date !== "string" || !isCalendarDate(bar.date)) continue;
     const close = typeof bar.close === "number" ? bar.close : Number.NaN;
     if (!Number.isFinite(close) || close <= 0) continue;
     byDate.set(bar.date, close);

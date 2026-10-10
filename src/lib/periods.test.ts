@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { describe, it } from "node:test";
 import { createHistoryCache, normalizeBars, type HistoryBatch } from "./history-data.ts";
 import {
   isTradingDay,
   latestSessionDate,
+  periodAnchorDate,
   oneMonthEarlier,
   tradingDaysBefore,
 } from "./market-calendar.ts";
@@ -27,7 +29,7 @@ describe("market calendar", () => {
 
   it("finds the session the latest price belongs to", () => {
     assert.equal(latestSessionDate(new Date("2026-10-07T14:00:00Z")), "2026-10-07"); // Wed 10:00 ET
-    assert.equal(latestSessionDate(new Date("2026-10-07T13:00:00Z")), "2026-10-06"); // Wed 09:00 ET, pre-market
+    assert.equal(latestSessionDate(new Date("2026-10-07T13:00:00Z")), "2026-10-07"); // Wed 09:00 ET, pre-market
     assert.equal(latestSessionDate(new Date("2026-10-07T23:00:00Z")), "2026-10-07"); // after the close
     assert.equal(latestSessionDate(new Date("2026-10-10T16:00:00Z")), "2026-10-09"); // Saturday
     assert.equal(latestSessionDate(new Date("2026-09-07T16:00:00Z")), "2026-09-04"); // Labor Day
@@ -140,7 +142,7 @@ describe("periodMove", () => {
     );
   const live = quotes({ A: 100, B: 50, C: null }, { A: 110, B: 45, C: 70 });
 
-  it("price-weighted boards get the index's own move from reference closes", () => {
+  it("price-weighted boards get a constituent basket move from reference closes", () => {
     const nodes = [
       { symbol: "A", weight: 1 },
       { symbol: "B", weight: 1 },
@@ -273,5 +275,65 @@ describe("history data", () => {
     assert.deepEqual(later.bars.get("ZZZ"), []);
     await cache.get(["ZZZ"], "2025-12-31", "2026-10-07", 62_000);
     assert.equal(calls.length, 2);
+  });
+});
+
+describe("lookback boundaries", () => {
+  it("uses today's anchor for premarket current prices, including first session of a year", () => {
+    const anchor = latestSessionDate(new Date("2026-01-02T13:00:00Z"));
+    assert.equal(anchor, "2026-01-02");
+    assert.equal(referenceDate("ytd", anchor), "2025-12-31");
+    assert.equal(referenceDate("1w", anchor), "2025-12-24");
+    assert.equal(referenceDate("1m", anchor), "2025-12-02");
+  });
+  it("YTD uses the current calendar year on New Year holidays and weekends", () => {
+    for (const instant of [
+      "2026-01-01T16:00:00Z",
+      "2028-01-01T16:00:00Z",
+      "2028-01-02T16:00:00Z",
+    ]) {
+      const anchor = periodAnchorDate(new Date(instant), "ytd");
+      assert.equal(
+        referenceDate("ytd", anchor),
+        instant.startsWith("2026") ? "2025-12-31" : "2027-12-31",
+      );
+    }
+  });
+  it("skips the announced 2025 national day of mourning", () => {
+    assert.equal(isTradingDay("2025-01-09"), false);
+    assert.equal(referenceDate("1w", "2025-01-16"), "2025-01-08");
+  });
+  it("has identical anchors and references in different host timezones", () => {
+    const cases = [
+      ["2026-10-07T07:59:59Z", "2026-10-06", "2026-09-29"],
+      ["2026-10-07T08:00:00Z", "2026-10-07", "2026-09-30"],
+      ["2026-03-09T07:59:59Z", "2026-03-06", "2026-02-27"],
+      ["2026-03-09T08:00:00Z", "2026-03-09", "2026-03-02"],
+      ["2026-11-02T08:59:59Z", "2026-10-30", "2026-10-23"],
+      ["2026-11-02T09:00:00Z", "2026-11-02", "2026-10-26"],
+      ["2026-03-06T14:29:59Z", "2026-03-06", "2026-02-27"],
+      ["2026-03-09T13:29:59Z", "2026-03-09", "2026-03-02"],
+      ["2026-03-09T13:30:00Z", "2026-03-09", "2026-03-02"],
+      ["2026-11-02T14:29:59Z", "2026-11-02", "2026-10-26"],
+      ["2026-11-27T18:00:00Z", "2026-11-27", "2026-11-19"],
+      ["2026-03-31T23:00:00Z", "2026-03-31", "2026-03-24"],
+      ["2026-04-01T02:00:00Z", "2026-03-31", "2026-03-24"],
+      ["2026-04-03T16:00:00Z", "2026-04-02", "2026-03-26"],
+      ["2026-10-11T16:00:00Z", "2026-10-09", "2026-10-02"],
+    ];
+    const code = `import assert from 'node:assert/strict';
+      import {latestSessionDate} from './src/lib/market-calendar.ts';
+      import {referenceDate} from './src/lib/periods.ts';
+      for (const [instant, expected, ref] of ${JSON.stringify(cases)}) {
+        const anchor = latestSessionDate(new Date(instant));
+        assert.equal(anchor, expected, instant);
+        assert.equal(referenceDate('1w', anchor), ref, instant);
+      }`;
+    for (const TZ of ["UTC", "Asia/Jerusalem", "America/Los_Angeles"])
+      execFileSync(
+        process.execPath,
+        ["--experimental-strip-types", "--input-type=module", "-e", code],
+        { env: { ...process.env, TZ } },
+      );
   });
 });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { parseReferenceRequest } from "./history-request.ts";
-import { parseSparkHistory } from "./history-yahoo.ts";
+import { checkedSparkHistory, parseSparkHistory } from "./history-yahoo.ts";
 
 // 2025-12-31 and 2026-01-02 regular sessions open at 14:30 UTC.
 const DEC31 = Date.parse("2025-12-31T14:30:00Z") / 1000;
@@ -89,5 +89,42 @@ describe("parseReferenceRequest", () => {
 
   it("defaults an unknown period to 1W", () => {
     assert.equal(parseReferenceRequest({ period: "1d" }, now).period, "1w");
+  });
+});
+
+describe("upstream errors and anchor validation", () => {
+  it("does not turn successful HTTP error/malformed payloads into missing history", () => {
+    for (const payload of [
+      null,
+      {},
+      { spark: { error: { code: "rate-limit" }, result: null } },
+      { AAPL: { error: "down" } },
+      { AAPL: { timestamp: "bad", close: [] } },
+    ])
+      assert.throws(() => checkedSparkHistory(payload, ["AAPL"]));
+    assert.deepEqual(checkedSparkHistory({ spark: { result: [], error: null } }, ["AAPL"]), []);
+    assert.deepEqual(checkedSparkHistory({ AAPL: { timestamp: [], close: [] } }, ["AAPL"]), [
+      { symbol: "AAPL", bars: [] },
+    ]);
+  });
+  it("rejects impossible calendar dates and accepts YTD's New Year holiday anchor", () => {
+    assert.equal(
+      parseReferenceRequest({ anchor: "2026-02-30" }, new Date("2026-03-02T16:00:00Z")).anchor,
+      "2026-03-02",
+    );
+    assert.equal(
+      parseReferenceRequest(
+        { anchor: "2026-01-01", period: "ytd" },
+        new Date("2026-01-01T16:00:00Z"),
+      ).anchor,
+      "2026-01-01",
+    );
+    assert.equal(
+      parseReferenceRequest(
+        { anchor: "2026-01-02", period: "1w" },
+        new Date("2026-01-02T13:00:00Z"),
+      ).anchor,
+      "2026-01-02",
+    );
   });
 });

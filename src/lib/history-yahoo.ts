@@ -48,6 +48,36 @@ export function parseSparkHistory(payload: unknown, symbols: readonly string[]):
   });
 }
 
+/** A 200 error/malformed response is an outage, not cached missing history. */
+export function checkedSparkHistory(payload: unknown, symbols: readonly string[]): DailyHistory[] {
+  if (!payload || typeof payload !== "object") throw new Error("Invalid history response");
+  const data = payload as Record<string, unknown>;
+  const spark = data.spark as { result?: unknown; error?: unknown } | undefined;
+  if (spark) {
+    if (spark.error || !Array.isArray(spark.result)) throw new Error("History upstream error");
+    for (const item of spark.result) {
+      const row = item as {
+        response?: { timestamp?: unknown; indicators?: { quote?: { close?: unknown }[] } }[];
+      } | null;
+      const response = row?.response?.[0];
+      if (
+        !Array.isArray(response?.timestamp) ||
+        !Array.isArray(response?.indicators?.quote?.[0]?.close)
+      )
+        throw new Error("Invalid history row");
+    }
+  } else {
+    const rows = symbols.filter((symbol) => data[symbol] != null);
+    if (!rows.length) throw new Error("Invalid history response");
+    for (const symbol of rows) {
+      const row = data[symbol] as { timestamp?: unknown; close?: unknown; error?: unknown };
+      if (row.error || !Array.isArray(row.timestamp) || !Array.isArray(row.close))
+        throw new Error("Invalid history row");
+    }
+  }
+  return parseSparkHistory(payload, symbols);
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -74,7 +104,7 @@ async function fetchChunk(symbols: string[], from: string): Promise<DailyHistory
       continue;
     }
     if (!res.ok) throw new Error(`upstream ${res.status}`);
-    return parseSparkHistory(await res.json(), symbols);
+    return checkedSparkHistory(await res.json(), symbols);
   }
   throw new Error(last);
 }

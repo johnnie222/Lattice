@@ -35,7 +35,7 @@ import {
   periodQuotes,
   type Period,
 } from "@/lib/periods";
-import { latestSessionDate } from "@/lib/market-calendar";
+import { periodAnchorDate } from "@/lib/market-calendar";
 import { activeBook, useBooks } from "@/store/books";
 
 const DEFAULT_BOARD = "spx";
@@ -142,9 +142,9 @@ export function Lattice() {
   // layer. Only display uses them (colour, move, filters, counts); tile sizes,
   // Today and Close keep the live 1D quotes.
   const session = clock?.session ?? "closed";
-  const anchor = useMemo(() => latestSessionDate(new Date()), [session]); // eslint-disable-line react-hooks/exhaustive-deps
+  const anchor = periodAnchorDate(new Date(), period);
   const referenceSymbols = useMemo(() => rawNodes.map((node) => node.symbol), [rawNodes]);
-  const references = useReferenceCloses(referenceSymbols, period, anchor);
+  const references = useReferenceCloses(referenceSymbols, period, anchor, refreshToken);
   const displayQuotes = useMemo(
     () => periodQuotes(quotes, period, references.references),
     [quotes, period, references.references],
@@ -178,9 +178,9 @@ export function Lattice() {
   const lookbackMove = useMemo(
     () =>
       lookback && !bookMode && (references.status === "ready" || references.status === "error")
-        ? periodMove(visible.length ? visible : baseNodes, displayQuotes, priceWeighted)
+        ? periodMove(visible, displayQuotes, priceWeighted)
         : null,
-    [lookback, bookMode, references.status, visible, baseNodes, displayQuotes, priceWeighted],
+    [lookback, bookMode, references.status, visible, displayQuotes, priceWeighted],
   );
   const lookbackPartial = lookbackMove != null && lookbackMove.covered < lookbackMove.total;
   const move = bookMode
@@ -305,6 +305,8 @@ export function Lattice() {
                   ? `${PERIOD_LABEL[period]} price moves`
                   : lookback && references.status === "loading"
                     ? `Loading ${PERIOD_LABEL[period]}`
+                    : lookback && references.status === "ready"
+                      ? `No ${PERIOD_LABEL[period]} reference closes`
                     : lookback && references.status === "error"
                       ? `${PERIOD_LABEL[period]} unavailable`
                     : bookPartial && quoted.length
@@ -344,6 +346,12 @@ export function Lattice() {
           ) : null}
 
         </p>
+        {lookback && !bookMode ? (
+          <p className="px-2 text-center text-xs text-muted">
+            {priceWeighted ? "Price-weighted basket · " : "Weighted price moves · "}
+            {lookbackMove ? `${lookbackMove.covered} of ${lookbackMove.total} priced` : "Loading coverage"}
+          </p>
+        ) : null}
         <div className="mt-1 flex justify-center" role="radiogroup" aria-label="Period">
           {PERIODS.map((item) => (
             <button

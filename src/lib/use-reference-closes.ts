@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchReferenceCloses } from "@/lib/history";
-import { isLookback, type Period, type ReferenceClose } from "@/lib/periods";
+import { isLookback, referenceDate, type Period, type ReferenceClose } from "@/lib/periods";
 
 // Reference closes don't move during a session, so they're cached per
 // period + anchor session for the browser session and never polled. The live
@@ -13,15 +13,36 @@ function storageKey(period: Period, anchor: string) {
   return `${STORAGE}:${period}:${anchor}`;
 }
 
-function readStored(key: string): Stored {
+function validReferences(raw: unknown, period: Exclude<Period, "1d">, anchor: string): Stored {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const date = referenceDate(period, anchor);
+  return Object.fromEntries(
+    Object.entries(raw).filter(([, value]) => {
+      if (!value || typeof value !== "object") return false;
+      const ref = value as ReferenceClose;
+      return (
+        ref.date === date &&
+        (ref.close === null ||
+          (typeof ref.close === "number" && Number.isFinite(ref.close) && ref.close > 0))
+      );
+    }),
+  );
+}
+
+function readStored(key: string, period: Exclude<Period, "1d">, anchor: string): Stored {
   try {
-    return JSON.parse(sessionStorage.getItem(key) ?? "{}") as Stored;
+    return validReferences(JSON.parse(sessionStorage.getItem(key) ?? "{}"), period, anchor);
   } catch {
     return {};
   }
 }
 
-export function useReferenceCloses(symbols: readonly string[], period: Period, anchor: string) {
+export function useReferenceCloses(
+  symbols: readonly string[],
+  period: Period,
+  anchor: string,
+  refreshToken = 0,
+) {
   const key = isLookback(period) ? symbols.filter(Boolean).join("|") : "";
   const [state, setState] = useState<{
     id: string;
@@ -32,7 +53,7 @@ export function useReferenceCloses(symbols: readonly string[], period: Period, a
     references: {},
     status: "idle",
   });
-  const id = `${period}:${anchor}:${key}`;
+  const id = `${period}:${anchor}:${key}:${refreshToken}`;
 
   useEffect(() => {
     if (!key || !isLookback(period)) {
@@ -41,7 +62,7 @@ export function useReferenceCloses(symbols: readonly string[], period: Period, a
     }
     let cancel = false;
     const storage = storageKey(period, anchor);
-    const cached = readStored(storage);
+    const cached = readStored(storage, period, anchor);
     const list = key.split("|");
     const need = list.filter((symbol) => !cached[symbol]);
     setState({ id, references: cached, status: need.length ? "loading" : "ready" });
@@ -54,16 +75,18 @@ export function useReferenceCloses(symbols: readonly string[], period: Period, a
       for (const batch of batches) {
         if (cancel || !batch.length) continue;
         try {
-          const res = await fetchReferenceCloses({ data: { symbols: batch, period, anchor } });
+          const res: Awaited<ReturnType<typeof fetchReferenceCloses>> = await fetchReferenceCloses({
+            data: { symbols: batch, period, anchor },
+          });
           if (cancel) return;
           // The server may have corrected the anchor; only keep matching answers.
-          if (res.anchor !== anchor) {
+          if (res.anchor !== anchor || res.period !== period) {
             failed = true;
             continue;
           }
           // Unavailable symbols stay out of the cache so the next view retries them.
           if (res.unavailable.length) failed = true;
-          merged = { ...merged, ...res.references };
+          merged = { ...merged, ...validReferences(res.references, period, anchor) };
           setState({ id, references: merged, status: "loading" });
         } catch {
           failed = true;

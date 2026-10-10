@@ -62,6 +62,7 @@ export function nyseCalendar(y: number): YearCalendar {
   const hit = calendars.get(y);
   if (hit) return hit;
   const holidays = new Set<string>();
+  if (y === 2025) holidays.add("2025-01-09"); // Carter national day of mourning
   // NYSE does not observe New Year's on the prior Friday when Jan 1 is a Saturday.
   const newYear = utc(y, 0, 1);
   if (newYear.getUTCDay() !== 6) holidays.add(ymd(observed(newYear)));
@@ -135,19 +136,30 @@ export function newYorkDate(at: Date): string {
 }
 
 /**
- * The session the latest regular-session price belongs to: today once the
- * opening bell has rung on a trading day, otherwise the previous trading day
- * (pre-market, weekends and holidays still show the last close).
+ * Lookback session anchor for latest prices, including premarket prices.
+ * Premarket starts at 4am ET. Before then, the latest price belongs to the
+ * previous session; weekends and holidays also use the most recent session.
  */
 export function latestSessionDate(now: Date): string {
-  const today = newYorkDate(now);
-  const time = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).format(now);
-  const [hh, mm] = time.split(":").map(Number) as [number, number];
-  if (isTradingDay(today) && hh * 60 + mm >= 9 * 60 + 30) return today;
-  return tradingDayOnOrBefore(addDays(today, -1));
+  const date = newYorkDate(now);
+  const hour = Number(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      hour: "2-digit",
+      hourCycle: "h23",
+    }).format(now),
+  );
+  return tradingDayOnOrBefore(hour >= 4 ? date : addDays(date, -1));
+}
+
+/** YTD follows the calendar year even during a New Year market closure. */
+export function periodAnchorDate(now: Date, period: string): string {
+  return period === "ytd" ? newYorkDate(now) : latestSessionDate(now);
+}
+
+/** Reject impossible dates before using calendar arithmetic. */
+export function isCalendarDate(date: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const value = Date.parse(`${date}T00:00:00Z`);
+  return Number.isFinite(value) && new Date(value).toISOString().slice(0, 10) === date;
 }

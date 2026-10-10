@@ -63,9 +63,17 @@ const book = {
 };
 
 let passed = 0;
-async function scenario(name, path, run, { width = 390, history = "ok" } = {}) {
-  const context = await browser.newContext({ viewport: { width, height: 844 } });
-  await context.clock.setFixedTime(NOW);
+async function scenario(
+  name,
+  path,
+  run,
+  { width = 390, history = "ok", now = NOW, stored = null } = {},
+) {
+  const context = await browser.newContext({
+    viewport: { width, height: 844 },
+    timezoneId: "Asia/Jerusalem",
+  });
+  await context.clock.setFixedTime(now);
   const page = await context.newPage();
   const errors = [];
   const historyBodies = [];
@@ -77,6 +85,11 @@ async function scenario(name, path, run, { width = 390, history = "ok" } = {}) {
     },
     { books: [book], activeId: "main" },
   );
+  if (stored !== null)
+    await context.addInitScript((value) => {
+      sessionStorage.setItem("lattice-refs-v1:1w:2026-10-07", value);
+    }, stored);
+  let historyMode = history;
   await page.route("**/*", async (route) => {
     const request = route.request();
     if (!request.url().startsWith(origin + "/")) {
@@ -96,17 +109,23 @@ async function scenario(name, path, run, { width = 390, history = "ok" } = {}) {
       return route.fulfill({ json: { result: { quotes, asOf: NOW.getTime() }, context: {} } });
     }
     historyBodies.push(body);
-    if (history === "fail")
+    if (historyMode === "fail")
       return route.fulfill({ status: 503, contentType: "text/plain", body: "down" });
-    if (history === "slow") await new Promise((resolve) => setTimeout(resolve, 1500));
+    if (historyMode === "slow") await new Promise((resolve) => setTimeout(resolve, 1500));
     const period = body.match(/"s":"(1w|1m|ytd)"/)[1];
     const anchor = body.match(/"s":"(\d{4}-\d{2}-\d{2})"/)[1];
     const ref = REFS[period];
     const references = Object.fromEntries(
-      Object.entries(ref.closes).map(([symbol, close]) => [symbol, { date: ref.date, close }]),
+      Object.entries(ref.closes).map(([symbol, close]) => [
+        symbol,
+        {
+          date: period === "ytd" ? `${Number(anchor.slice(0, 4)) - 1}-12-31` : ref.date,
+          close: historyMode === "missing" ? null : close,
+        },
+      ]),
     );
     // "outage": the provider couldn't fetch AAPL this time.
-    const unavailable = history === "outage" ? ["AAPL"] : [];
+    const unavailable = historyMode === "outage" ? ["AAPL"] : [];
     for (const symbol of unavailable) delete references[symbol];
     return route.fulfill({
       json: { result: { period, anchor, references, unavailable }, context: {} },
@@ -114,7 +133,12 @@ async function scenario(name, path, run, { width = 390, history = "ok" } = {}) {
   });
   await page.goto(origin + path);
   try {
-    await run(page, { historyBodies });
+    await run(page, {
+      historyBodies,
+      recover: () => {
+        historyMode = "ok";
+      },
+    });
     assert.deepEqual(errors, []);
     assert.equal(
       await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),
@@ -163,6 +187,7 @@ try {
       // (0 + 0 + 40 + 5) / (450 + 202 + 160 + 105). Labelled partial, since most
       // of the Dow has no fixture data.
       await page.getByText("+4.91% · 1W · partial", { exact: true }).waitFor();
+      await page.getByText("Price-weighted basket · 4 of 30 priced", { exact: true }).waitFor();
       for (const body of historyBodies) assert.match(body, new RegExp(EXPECTED_ANCHOR));
       await page.screenshot({ path: `${shots}/pr4-market-1w-mobile.png` });
       await pick(page, "1M");
@@ -286,6 +311,103 @@ try {
       await page.screenshot({ path: `${shots}/pr4-market-1w-desktop.png` });
     },
     { width: 1280 },
+  );
+
+  await scenario(
+    "missing bars finish loading with an explicit missing label",
+    "/?board=dow&t=1w",
+    async (page) => {
+      await page.getByText("No 1W reference closes", { exact: true }).waitFor();
+      assert.match(await tileLabel(page, "AAPL"), /—$/);
+    },
+    { history: "missing" },
+  );
+
+  for (const stored of ["null", JSON.stringify({ AAPL: { date: "2026-09-29", close: 1 } })]) {
+    await scenario(
+      "invalid cached references cannot supply a wrong-date return",
+      "/?board=dow&t=1w",
+      async (page, { historyBodies }) => {
+        await waitLabel(page, "AAPL", "+4.76%");
+        assert.ok(historyBodies.length > 0);
+      },
+      { stored },
+    );
+  }
+
+  await scenario(
+    "manual refresh retries an unavailable history without changing the view",
+    "/?board=dow&t=1w",
+    async (page, { historyBodies, recover }) => {
+      await page.getByText("1W unavailable", { exact: true }).waitFor();
+      const before = historyBodies.length;
+      recover();
+      await page.getByRole("button", { name: "Refresh quotes" }).click();
+      await waitLabel(page, "AAPL", "+4.76%");
+      assert.ok(historyBodies.length > before);
+      assert.match(page.url(), /t=1w/);
+    },
+    { history: "fail" },
+  );
+
+  for (const [instant, anchor, period] of [
+    ["2026-10-07T13:00:00Z", "2026-10-07", "1w"],
+    ["2026-01-02T13:00:00Z", "2026-01-02", "ytd"],
+    ["2026-01-01T16:00:00Z", "2026-01-01", "ytd"],
+    ["2026-10-10T16:00:00Z", "2026-10-10", "ytd"],
+    ["2026-11-02T14:00:00Z", "2026-11-02", "ytd"],
+  ]) {
+    await scenario(
+      `lookback anchor at ${instant}`,
+      `/?board=dow&t=${period}`,
+      async (page, { historyBodies }) => {
+        await waitLabel(page, "AAPL", period === "1w" ? "+4.76%" : "+25.00%");
+        for (const body of historyBodies) assert.match(body, new RegExp(anchor));
+      },
+      { now: new Date(instant) },
+    );
+  }
+  await scenario(
+    "YTD changes year while the session remains closed",
+    "/?board=dow&t=ytd",
+    async (page, { historyBodies }) => {
+      await waitLabel(page, "AAPL", "+25.00%");
+      assert.ok(historyBodies.some((body) => body.includes("2025-12-31")));
+      await page.clock.setFixedTime(new Date("2026-01-01T05:00:01Z"));
+      await page.waitForFunction(() => document.body.innerText.includes("00:00:01"));
+      await page.waitForTimeout(100);
+      assert.ok(historyBodies.some((body) => body.includes("2026-01-01")));
+      await waitLabel(page, "AAPL", "+25.00%");
+    },
+    { now: new Date("2026-01-01T04:59:59Z") },
+  );
+  await scenario(
+    "stock drill, back navigation and search preserve the period URL",
+    "/?board=spx&t=1m",
+    async (page) => {
+      await waitLabel(page, "AAPL", "-12.00%");
+      await tile(page, "AAPL").click();
+      await page.getByRole("button", { name: "Open Technology", exact: true }).click();
+      await waitLabel(page, "MSFT", "+4.65%");
+      assert.match(page.url(), /sector=tech/);
+      assert.match(page.url(), /t=1m/);
+      await page.getByRole("button", { name: "Back to full map" }).click();
+      await waitLabel(page, "AAPL", "-12.00%");
+      assert.doesNotMatch(page.url(), /sector=/);
+      assert.match(page.url(), /t=1m/);
+    },
+  );
+  await scenario(
+    "an empty search never displays the whole board's return",
+    "/?board=dow&t=1w&q=NOSUCHNAME",
+    async (page) => {
+      await page.getByText("No 1W reference closes", { exact: true }).waitFor();
+      assert.doesNotMatch(await page.locator("header").innerText(), /\+4\.91%/);
+      assert.match(page.url(), /q=NOSUCHNAME/);
+      await pick(page, "YTD");
+      assert.match(page.url(), /q=NOSUCHNAME/);
+      assert.match(page.url(), /t=ytd/);
+    },
   );
   console.log(`${passed} browser scenarios passed`);
 } finally {
