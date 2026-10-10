@@ -54,9 +54,10 @@ describe("marketFacts", () => {
     });
     assert.equal(facts.sectorBreadth, null);
     assert.equal(facts.dayType, null);
-    // Known sectors can still be ranked.
+    // Known rows remain available; overall extremes must wait for complete data.
     assert.equal(facts.sectors.length, 8);
-    assert.ok(facts.strongestSector);
+    assert.equal(facts.strongestSector, null);
+    assert.equal(facts.weakestSector, null);
   });
 
   it("reports nothing it doesn't have", () => {
@@ -68,5 +69,33 @@ describe("marketFacts", () => {
     assert.deepEqual(facts.sectors, []);
     // A single priced sector is not "strongest" of anything.
     assert.equal(marketFacts({ XLK: { changePercent: 1 } }).strongestSector, null);
+  });
+});
+
+it("does not claim overall sector leaders when missing quotes could outrank them", () => {
+  const quotes = moves([1, 0.8, -1, 0.2, 0.1, 0, 0.3, 0.4, 0.5, 0.6, 0.7]);
+  delete quotes[SECTOR_FUNDS[4]!.symbol];
+  const facts = marketFacts(quotes);
+  assert.equal(facts.strongestSector, null);
+  assert.equal(facts.weakestSector, null);
+  assert.equal(facts.sectors.length, 10);
+  assert.equal(facts.sectorBreadth, null);
+  assert.equal(facts.dayType, null);
+});
+
+it("handles both sides of the 80% threshold and the inclusive flat band", () => {
+  assert.equal(
+    marketFacts(moves([1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1]), SECTOR_FUNDS.slice(0, 10)).dayType,
+    "broad-advance", // Exactly 8/10 = 80%, not just the 9/11 case.
+  );
+  assert.equal(
+    marketFacts(moves([-1, -1, -1, -1, -1, -1, -1, -1, -1, 1, 1])).dayType,
+    "broad-decline",
+  );
+  assert.equal(marketFacts(moves([-1, -1, -1, -1, -1, -1, -1, -1, 1, 1, 1])).dayType, "mixed");
+  assert.deepEqual(marketFacts(moves([0.05, -0.05, 0, 0, 0, 0, 0, 0, 0, 0, 0])).sectorBreadth, {
+    up: 0,
+    down: 0,
+    flat: 11,
   });
 });

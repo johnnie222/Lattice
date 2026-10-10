@@ -34,7 +34,7 @@ export type MarketFacts = {
   /** Priced sector funds, strongest first. */
   sectors: SectorMove[];
   sectorCoverage: { total: number; priced: number; complete: boolean; missing: string[] };
-  /** Null unless at least two sectors are priced. */
+  /** Overall extremes; null unless every sector is priced and there are at least two. */
   strongestSector: SectorMove | null;
   weakestSector: SectorMove | null;
   /** Up / down / flat sector count. Null unless every sector is priced. */
@@ -83,8 +83,8 @@ export function marketFacts(
     benchmarkChangePercent: move(quotes[MARKET_BENCHMARK]),
     sectors,
     sectorCoverage: { total: funds.length, priced: sectors.length, complete, missing },
-    strongestSector: sectors.length >= 2 ? sectors[0]! : null,
-    weakestSector: sectors.length >= 2 ? sectors[sectors.length - 1]! : null,
+    strongestSector: complete && sectors.length >= 2 ? sectors[0]! : null,
+    weakestSector: complete && sectors.length >= 2 ? sectors[sectors.length - 1]! : null,
     sectorBreadth,
     dayType,
   };

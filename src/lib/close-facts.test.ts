@@ -71,8 +71,8 @@ describe("buildCloseFacts", () => {
     close(p.weakestSector?.dayChange, -20);
     assert.deepEqual(p.breadth, analysis.breadth);
     assert.deepEqual(facts.summary, [
-      "Your portfolio finished +0.64%, 0.10 pts ahead of the S&P 500.",
-      "NVDA was the largest contributor; 3 of 5 holdings closed higher.",
+      "Your portfolio returned +0.64%, 0.10 pts ahead of the S&P 500.",
+      "NVDA was the largest contributor; 3 up · 2 down · 0 flat among 5 priced holdings.",
     ]);
     assert.equal(facts.market.dayType, "broad-advance");
   });
@@ -95,7 +95,7 @@ describe("buildCloseFacts", () => {
     assert.deepEqual(p.coverage.missing, ["XOM"]);
     assert.deepEqual(facts.summary, [
       "Partial close: +$151.50 from 4 of 5 holdings with prices.",
-      "NVDA was the largest contributor; 3 of 4 holdings closed higher.",
+      "NVDA was the largest known contributor; 3 up · 1 down · 0 flat among 4 priced holdings.",
     ]);
     assert.doesNotMatch(facts.summary.join(" "), /%|S&P/);
   });
@@ -104,7 +104,7 @@ describe("buildCloseFacts", () => {
     const analysis = analyzeHoldings({ holdings, quotes: fullQuotes, sectorBySymbol: sectors });
     const facts = buildCloseFacts(analysis, market);
     assert.equal(facts.portfolio?.relativeReturnPercent, null);
-    assert.equal(facts.summary[0], "Your portfolio finished +0.64%.");
+    assert.equal(facts.summary[0], "Your portfolio returned +0.64%.");
   });
 
   it("says behind / in line, and names the largest detractor when nothing rose", () => {
@@ -114,8 +114,8 @@ describe("buildCloseFacts", () => {
       benchmarkReturnPercent: 0.5,
     });
     assert.deepEqual(buildCloseFacts(down, market).summary, [
-      "Your portfolio finished -1.10%, 1.60 pts behind the S&P 500.",
-      "MSFT was the largest detractor; 0 of 1 holding closed higher.",
+      "Your portfolio returned -1.10%, 1.60 pts behind the S&P 500.",
+      "MSFT was the largest detractor; 0 up · 1 down · 0 flat among 1 priced holding.",
     ]);
     const level = analyzeHoldings({
       holdings: [{ symbol: "AAA", quantity: 1 }],
@@ -142,7 +142,7 @@ describe("buildCloseFacts", () => {
   it("falls back to the market when the book is empty or entirely unpriced", () => {
     assert.equal(buildCloseFacts(null, market).portfolio, null);
     assert.deepEqual(buildCloseFacts(null, market).summary, [
-      "The S&P 500 closed +0.54% in a broad advance.",
+      "The S&P 500 moved +0.54% in a broad advance.",
     ]);
     const mixed = marketFacts({
       "^GSPC": { changePercent: -0.12 },
@@ -151,16 +151,44 @@ describe("buildCloseFacts", () => {
       ),
     });
     assert.deepEqual(buildCloseFacts(null, mixed).summary, [
-      "The S&P 500 closed -0.12% on a mixed day.",
+      "The S&P 500 moved -0.12% on a mixed day.",
     ]);
     // Without every sector priced there is no day call, just the move.
     assert.deepEqual(
       buildCloseFacts(null, marketFacts({ "^GSPC": { changePercent: 0.2 } })).summary,
-      ["The S&P 500 closed +0.20%."],
+      ["The S&P 500 moved +0.20%."],
     );
     const unpriced = analyzeHoldings({ holdings, quotes: {} });
     const facts = buildCloseFacts(unpriced, marketFacts({}));
     assert.equal(facts.portfolio?.dayChange, null);
     assert.deepEqual(facts.summary, []);
+  });
+});
+
+describe("close claims are bounded by their structured facts", () => {
+  it("does not claim a flat-band holding closed higher or lower", () => {
+    const analysis = analyzeHoldings({
+      holdings: [
+        { symbol: "AAA", quantity: 1 },
+        { symbol: "BBB", quantity: 1 },
+      ],
+      quotes: { AAA: q(100.04, 100), BBB: q(99.96, 100) },
+    });
+    const facts = buildCloseFacts(analysis, market);
+    assert.deepEqual(facts.portfolio!.breadth, { quoted: 2, up: 0, down: 0, flat: 2, upRatio: 0 });
+    assert.match(facts.summary.join(" "), /0 up · 0 down · 2 flat/);
+    assert.doesNotMatch(facts.summary.join(" "), /closed higher|closed lower/);
+  });
+
+  it("qualifies partial drivers and avoids whole-portfolio sector extrema", () => {
+    const analysis = analyzeHoldings({
+      holdings,
+      quotes: { AAPL: fullQuotes.AAPL, XOM: fullQuotes.XOM },
+      sectorBySymbol: sectors,
+    });
+    const facts = buildCloseFacts(analysis, market);
+    assert.equal(facts.portfolio!.strongestSector, null);
+    assert.equal(facts.portfolio!.weakestSector, null);
+    assert.match(facts.summary.join(" "), /largest known contributor/);
   });
 });

@@ -47,7 +47,7 @@ export type PortfolioCloseFacts = {
   contributors: CloseMover[];
   detractors: CloseMover[];
   breadth: PortfolioBreadth;
-  /** Engine sectors by dollar contribution; null unless the book spans ≥2 sectors. */
+  /** Overall engine sectors by dollar contribution; null unless complete and spanning ≥2 sectors. */
   strongestSector: CloseSector | null;
   weakestSector: CloseSector | null;
 };
@@ -91,8 +91,9 @@ export function portfolioCloseFacts(analysis: HoldingsAnalysis): PortfolioCloseF
     detractors: analysis.detractors.slice(0, DRIVERS).map(mover),
     breadth: analysis.breadth,
     // The engine already orders sectors by dollar contribution, best first.
-    strongestSector: sectors.length >= 2 ? sector(sectors[0]!) : null,
-    weakestSector: sectors.length >= 2 ? sector(sectors[sectors.length - 1]!) : null,
+    strongestSector: analysis.complete && sectors.length >= 2 ? sector(sectors[0]!) : null,
+    weakestSector:
+      analysis.complete && sectors.length >= 2 ? sector(sectors[sectors.length - 1]!) : null,
   };
 }
 
@@ -114,7 +115,7 @@ export function closeSummary(portfolio: PortfolioCloseFacts | null, market: Mark
   if (portfolio && portfolio.dayChange != null) {
     if (portfolio.complete && portfolio.returnPercent != null) {
       sentences.push(
-        `Your portfolio finished ${formatPct(portfolio.returnPercent)}${relativeClause(portfolio.relativeReturnPercent)}.`,
+        `Your portfolio returned ${formatPct(portfolio.returnPercent)}${relativeClause(portfolio.relativeReturnPercent)}.`,
       );
     } else {
       sentences.push(
@@ -125,12 +126,12 @@ export function closeSummary(portfolio: PortfolioCloseFacts | null, market: Mark
     const lead = portfolio.contributors[0] ?? portfolio.detractors[0];
     if (lead) {
       drivers.push(
-        `${lead.symbol} was the largest ${portfolio.contributors[0] ? "contributor" : "detractor"}`,
+        `${lead.symbol} was the largest ${portfolio.complete ? "" : "known "}${portfolio.contributors[0] ? "contributor" : "detractor"}`,
       );
     }
     if (portfolio.breadth.quoted) {
       drivers.push(
-        `${portfolio.breadth.up} of ${plural(portfolio.breadth.quoted, "holding")} closed higher`,
+        `${portfolio.breadth.up} up · ${portfolio.breadth.down} down · ${portfolio.breadth.flat} flat among ${plural(portfolio.breadth.quoted, "priced holding")}`,
       );
     }
     if (drivers.length) {
@@ -150,7 +151,7 @@ export function closeSummary(portfolio: PortfolioCloseFacts | null, market: Mark
           : market.dayType === "mixed"
             ? " on a mixed day"
             : "";
-    sentences.push(`The S&P 500 closed ${formatPct(market.benchmarkChangePercent)}${breadth}.`);
+    sentences.push(`The S&P 500 moved ${formatPct(market.benchmarkChangePercent)}${breadth}.`);
   }
   return sentences;
 }

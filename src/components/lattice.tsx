@@ -211,8 +211,8 @@ export function Lattice() {
   const showMap = visible.length > 0;
   const bookEmpty = bookMode && bookSymbols(book).length === 0;
   const bookPartial = bookResult != null && !bookResult.analysis.complete && bookSymbols(book).length > 0;
-  // Outside the regular session the day is settled: the strip becomes the close.
-  const closeMode = session !== "open";
+  // Wait for the browser's NYSE clock before offering the Close surface.
+  const closeMode = clock != null && session !== "open";
 
   return (
     <main className="flex h-dvh flex-col bg-bg text-fg">
@@ -396,8 +396,8 @@ export function Lattice() {
       ) : null}
       {sheet === "info" ? <InfoSheet onClose={() => setSheet(null)} /> : null}
       {sheet === "book" ? <BookSheet quotes={quotes} onClose={() => setSheet(null)} /> : null}
-      {sheet === "today" && bookResult ? <TodaySheet result={bookResult} onClose={() => setSheet(null)} /> : null}
-      {sheet === "close" && closeFacts && bookResult ? (
+      {(sheet === "today" || (sheet === "close" && !closeMode)) && bookResult ? <TodaySheet result={bookResult} onClose={() => setSheet(null)} /> : null}
+      {sheet === "close" && closeMode && closeFacts && bookResult ? (
         <CloseSheet
           facts={closeFacts}
           when={`${CLOSE_WHEN[session]}${asOfLabel ? ` · as of ${asOfLabel}` : ""}`}

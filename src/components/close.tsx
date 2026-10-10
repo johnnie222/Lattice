@@ -37,7 +37,7 @@ function Line({ label, value, valueTone }: { label: string; value: string; value
   return (
     <li className="flex items-baseline justify-between gap-3 text-sm">
       <span className="text-muted">{label}</span>
-      <span className={`truncate text-right font-mono ${valueTone ?? ""}`}>{value}</span>
+      <span className={`min-w-0 text-right font-mono ${valueTone ?? ""}`}>{value}</span>
     </li>
   );
 }
@@ -85,12 +85,14 @@ export function CloseSheet({
               </span>
             </p>
           ) : null}
-          <dl className="mt-4 grid grid-cols-3 gap-3">
-            <Stat
-              label={p.complete ? "Day P&L" : "Known P&L"}
-              value={p.dayChange != null ? formatMoney(p.dayChange, true) : "—"}
-              valueTone={tone(p.dayChange)}
-            />
+          <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="col-span-2 sm:col-span-1">
+              <Stat
+                label={p.complete ? "Day P&L" : "Known P&L"}
+                value={p.dayChange != null ? formatMoney(p.dayChange, true) : "—"}
+                valueTone={tone(p.dayChange)}
+              />
+            </div>
             <Stat
               label="Return"
               value={p.returnPercent != null ? formatPct(p.returnPercent) : "—"}
@@ -102,8 +104,8 @@ export function CloseSheet({
               valueTone={tone(p.relativeReturnPercent)}
             />
           </dl>
-          <Movers title="Top contributors" rows={moverRows(p.contributors)} />
-          <Movers title="Top detractors" rows={moverRows(p.detractors)} />
+          <Movers title={p.complete ? "Top contributors" : "Known contributors"} rows={moverRows(p.contributors)} />
+          <Movers title={p.complete ? "Top detractors" : "Known detractors"} rows={moverRows(p.detractors)} />
           {p.breadth.quoted || p.strongestSector ? (
             <Section title="Breadth & sectors">
               <ul className="flex flex-col gap-1">
@@ -159,7 +161,7 @@ export function CloseSheet({
             value={
               m.dayType && m.sectorBreadth
                 ? `${DAY_TYPE[m.dayType]} · ${m.sectorBreadth.up} of ${m.sectorCoverage.total} sectors up`
-                : "Sector data incomplete"
+                : `Sector data incomplete · ${m.sectorCoverage.priced} of ${m.sectorCoverage.total} priced`
             }
           />
         </ul>
