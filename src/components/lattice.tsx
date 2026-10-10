@@ -5,6 +5,9 @@ import { BOARDS, sectorLabel, type SectorId } from "@/data/universe";
 import { Heatmap } from "@/components/heatmap";
 import { BoardSheet, BookSheet, FilterSheet, InfoSheet, StockSheet, type SheetId } from "@/components/sheets";
 import { TodaySheet, TodayStrip } from "@/components/today";
+import { CloseSheet } from "@/components/close";
+import { buildCloseFacts } from "@/lib/close-facts";
+import { marketFacts, SECTOR_FUNDS } from "@/lib/market-facts";
 import { analyzeBook, BENCHMARK_SYMBOL, bookSymbols, bookTileWeights } from "@/lib/book-analysis";
 import { isLegacyBook } from "@/lib/book-model";
 import { formatAsOf, formatPct, marketClock, sessionLabel, type Session } from "@/lib/format";
@@ -24,6 +27,14 @@ import { useQuotes } from "@/lib/use-quotes";
 import { activeBook, useBooks } from "@/store/books";
 
 const DEFAULT_BOARD = "spx";
+
+const CLOSE_WHEN: Record<Session, string> = {
+  open: "Market open",
+  post: "After the close",
+  closed: "Market closed",
+  pre: "Before the open",
+  holiday: "Market holiday",
+};
 // Past this, quotes on screen are called out as delayed.
 const STALE_MS: Record<Session, number> = {
   open: 3 * 60_000,
@@ -93,14 +104,24 @@ export function Lattice() {
 
   // Symbols come from the quote-independent nodes so price weighting can't
   // change the fetch key and restart polling.
-  // The book also needs the S&P 500 for "vs S&P 500".
+  // The book also needs the S&P 500 for "vs S&P 500", and the sector funds
+  // for Lattice Close's market context. Market maps fetch exactly as before.
   const symbols = useMemo(() => {
     const list = [...rawNodes].sort((a, b) => b.weight - a.weight).map((node) => node.symbol);
-    return bookMode ? [...list, BENCHMARK_SYMBOL] : list;
+    if (!bookMode) return list;
+    const extra = [BENCHMARK_SYMBOL, ...SECTOR_FUNDS.map((fund) => fund.symbol)];
+    return [...list, ...extra.filter((symbol) => !list.includes(symbol))];
   }, [rawNodes, bookMode]);
   const { quotes, asOf, status } = useQuotes(symbols, refreshToken, bookMode);
   const priceWeighted = !bookMode && board.weighting === "price";
   const bookResult = useMemo(() => (bookMode ? analyzeBook(book, quotes) : null), [bookMode, book, quotes]);
+  const closeFacts = useMemo(
+    () =>
+      bookResult
+        ? buildCloseFacts(bookResult.kind === "holdings" ? bookResult.analysis : null, marketFacts(quotes))
+        : null,
+    [bookResult, quotes],
+  );
   const baseNodes = useMemo(() => {
     if (bookResult) {
       const weights = bookTileWeights(book, bookResult);
@@ -190,6 +211,8 @@ export function Lattice() {
   const showMap = visible.length > 0;
   const bookEmpty = bookMode && bookSymbols(book).length === 0;
   const bookPartial = bookResult != null && !bookResult.analysis.complete && bookSymbols(book).length > 0;
+  // Outside the regular session the day is settled: the strip becomes the close.
+  const closeMode = session !== "open";
 
   return (
     <main className="flex h-dvh flex-col bg-bg text-fg">
@@ -272,7 +295,16 @@ export function Lattice() {
         </p>
         {bookResult && !bookEmpty ? (
           <div className="mt-2 flex gap-2">
-            <TodayStrip result={bookResult} onOpen={() => setSheet("today")} />
+            {closeMode ? (
+              <TodayStrip
+                result={bookResult}
+                label="Close"
+                ariaLabel="Open Lattice Close"
+                onOpen={() => setSheet("close")}
+              />
+            ) : (
+              <TodayStrip result={bookResult} onOpen={() => setSheet("today")} />
+            )}
             <button
               type="button"
               onClick={() => setSheet("book")}
@@ -365,6 +397,15 @@ export function Lattice() {
       {sheet === "info" ? <InfoSheet onClose={() => setSheet(null)} /> : null}
       {sheet === "book" ? <BookSheet quotes={quotes} onClose={() => setSheet(null)} /> : null}
       {sheet === "today" && bookResult ? <TodaySheet result={bookResult} onClose={() => setSheet(null)} /> : null}
+      {sheet === "close" && closeFacts && bookResult ? (
+        <CloseSheet
+          facts={closeFacts}
+          when={`${CLOSE_WHEN[session]}${asOfLabel ? ` · as of ${asOfLabel}` : ""}`}
+          legacy={bookResult.kind === "legacy"}
+          onToday={() => setSheet("today")}
+          onClose={() => setSheet(null)}
+        />
+      ) : null}
       {sheet === "stock" && selected ? (
         <StockSheet
           key={selected}

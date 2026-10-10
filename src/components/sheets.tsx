@@ -16,7 +16,7 @@ import { activeBook, useBooks, type Book } from "@/store/books";
 import { isLegacyBook, suggestQuantities } from "@/lib/book-model";
 import { Mark } from "@/components/mark";
 
-export type SheetId = "boards" | "filter" | "info" | "book" | "stock" | "today";
+export type SheetId = "boards" | "filter" | "info" | "book" | "stock" | "today" | "close";
 
 export function Sheet({
   title,

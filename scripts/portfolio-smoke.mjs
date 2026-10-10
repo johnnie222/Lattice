@@ -33,6 +33,9 @@ const book = {
 let passed = 0;
 async function scenario(name, state, run, version = 1, width = 390) {
   const context = await browser.newContext({ viewport: { width, height: 844 } });
+  // Pin a regular-session time (Wed 11:00 ET): outside it the strip becomes
+  // Lattice Close, and these scenarios exercise My Portfolio Today.
+  await context.clock.setFixedTime(new Date("2026-10-07T15:00:00Z"));
   const page = await context.newPage();
   let quotes = allQuotes;
   const errors = [];

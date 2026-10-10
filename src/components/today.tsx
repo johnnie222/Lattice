@@ -17,8 +17,21 @@ function breadthText(up: number, quoted: number, noun: string): string {
   return `${up} of ${quoted} ${noun}${quoted === 1 ? "" : "s"} up`;
 }
 
-/** The compact, glanceable line under the header. */
-export function TodayStrip({ result, onOpen }: { result: BookAnalysis; onOpen: () => void }) {
+/**
+ * The compact, glanceable line under the header. Outside the regular session
+ * the same line is labelled "Close" and opens Lattice Close.
+ */
+export function TodayStrip({
+  result,
+  onOpen,
+  label = "Today",
+  ariaLabel = "Open My Portfolio Today",
+}: {
+  result: BookAnalysis;
+  onOpen: () => void;
+  label?: string;
+  ariaLabel?: string;
+}) {
   let headline: { text: string; value: number | null };
   const details: string[] = [];
 
@@ -57,10 +70,10 @@ export function TodayStrip({ result, onOpen }: { result: BookAnalysis; onOpen: (
     <button
       type="button"
       onClick={onOpen}
-      aria-label="Open My Portfolio Today"
+      aria-label={ariaLabel}
       className="flex min-w-0 flex-1 items-center gap-3 rounded-xl border border-line bg-surface px-3 py-2 text-left"
     >
-      <span className="text-xs font-semibold uppercase tracking-wide text-muted">Today</span>
+      <span className="text-xs font-semibold uppercase tracking-wide text-muted">{label}</span>
       <span className="min-w-0 flex-1">
         <span
           className={`block truncate font-mono text-base font-semibold ${tone(headline.value)}`}
@@ -76,7 +89,7 @@ export function TodayStrip({ result, onOpen }: { result: BookAnalysis; onOpen: (
   );
 }
 
-function Stat({
+export function Stat({
   label,
   value,
   sub,
@@ -96,7 +109,7 @@ function Stat({
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+export function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="mt-5">
       <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">{title}</h3>
@@ -105,9 +118,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-type MoverRow = { symbol: string; main: string; mainValue: number; sub: string };
+export type MoverRow = { symbol: string; main: string; mainValue: number; sub: string };
 
-function Movers({ title, rows }: { title: string; rows: MoverRow[] }) {
+export function Movers({ title, rows }: { title: string; rows: MoverRow[] }) {
   if (!rows.length) return null;
   return (
     <Section title={title}>
