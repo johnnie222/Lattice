@@ -1,13 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getQuotes, parseSymbols, type HttpGet, type QuoteResult } from "@/lib/quote-core";
+import { fetchGet } from "@/lib/http-get";
+import { getQuotes, parseSymbols, type QuoteResult } from "@/lib/quote-core";
 
 export type { Quote } from "@/lib/quote-core";
 
-const serverGet: HttpGet = async (url, headers) => {
-  const res = await fetch(url, { headers, signal: AbortSignal.timeout(12_000) });
-  return { status: res.status, data: res.ok ? await res.json() : null };
-};
-
 export const fetchQuotes = createServerFn({ method: "POST" })
   .validator((input: unknown) => parseSymbols(input))
-  .handler(async ({ data }): Promise<QuoteResult> => getQuotes(serverGet, data.symbols, data.fresh, data.period));
+  .handler(async ({ data }): Promise<QuoteResult> => getQuotes(fetchGet(12_000), data.symbols, data.fresh));

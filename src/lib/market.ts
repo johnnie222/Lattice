@@ -158,12 +158,12 @@ export function boardNodes(board: Board): MapNode[] {
 // percent move. Names without a quote yet borrow the average so nothing jumps.
 export function applyPriceWeights(
   nodes: MapNode[],
-  quotes: Record<string, { price: number; change: number }>,
+  quotes: Record<string, { price: number; change: number | null }>,
 ): MapNode[] {
   const prev = new Map<string, number>();
   for (const node of nodes) {
     const quote = quotes[node.symbol];
-    const close = quote ? quote.price - quote.change : NaN;
+    const close = quote?.change != null ? quote.price - quote.change : NaN;
     if (Number.isFinite(close) && close > 0) prev.set(node.symbol, close);
   }
   if (!prev.size) return nodes.map((node) => ({ ...node, weight: 1 }));
@@ -191,13 +191,13 @@ export function matchesMove(pct: number | null, filter: FilterId): boolean {
 
 export function weightedChange(
   nodes: MapNode[],
-  quotes: Record<string, { changePercent: number }>,
+  quotes: Record<string, { changePercent: number | null }>,
 ): number | null {
   let acc = 0;
   let weight = 0;
   for (const node of nodes) {
     const quote = quotes[node.symbol];
-    if (!quote || node.weight <= 0) continue;
+    if (!quote || quote.changePercent == null || !Number.isFinite(quote.changePercent) || node.weight <= 0) continue;
     acc += node.weight * quote.changePercent;
     weight += node.weight;
   }

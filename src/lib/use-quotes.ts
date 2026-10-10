@@ -1,15 +1,13 @@
 import { useEffect, useState } from "react";
 import { marketClock, type Session } from "@/lib/format";
-import type { Period, Quote } from "@/lib/quote-core";
+import type { Quote } from "@/lib/quote-core";
 import { loadQuotes } from "@/lib/quote-source";
 import { useSettings } from "@/store/settings";
 
-const STORAGE = "lattice-quotes-v1";
+import { replaceQuoteBatch } from "./quote-data.ts";
 
-// One cache per window; the day keeps the original key.
-function storageKey(period: Period): string {
-  return period === "1d" ? STORAGE : `${STORAGE}:${period}`;
-}
+// v1 cached synthetic zero moves and did not carry previousClose.
+const STORAGE = "lattice-quotes-v2";
 
 // Prices only move fast while the cash session is open.
 const POLL_MS: Record<Session, number> = {
@@ -28,7 +26,12 @@ export function pollInterval(session: Session): number | null {
   return Number(pref) * 1000;
 }
 
-export function useQuotes(symbols: string[], refreshToken: number, period: Period = "1d") {
+/**
+ * Live quotes (price vs previous close) for `symbols`. Market maps fill in
+ * batch by batch; portfolio figures pass `waitForAll` so one refresh is
+ * committed at once and fresh and old prices are never mixed.
+ */
+export function useQuotes(symbols: string[], refreshToken: number, waitForAll = false) {
   const key = symbols.filter(Boolean).join("|");
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [asOf, setAsOf] = useState<number | null>(null);
@@ -36,9 +39,7 @@ export function useQuotes(symbols: string[], refreshToken: number, period: Perio
 
   useEffect(() => {
     try {
-      setQuotes({});
-      setAsOf(null);
-      const raw = sessionStorage.getItem(storageKey(period));
+      const raw = sessionStorage.getItem(STORAGE);
       if (!raw) return;
       const parsed = JSON.parse(raw) as { at?: number; quotes?: Record<string, Quote> };
       if (!parsed.quotes || !parsed.at || Date.now() - parsed.at > 10 * 60_000) return;
@@ -47,7 +48,7 @@ export function useQuotes(symbols: string[], refreshToken: number, period: Perio
     } catch {
       /* ignore broken cache */
     }
-  }, [period]);
+  }, []);
 
   useEffect(() => {
     if (!key) {
@@ -57,46 +58,45 @@ export function useQuotes(symbols: string[], refreshToken: number, period: Perio
     const list = key.split("|");
     let cancel = false;
 
-    const pull = async (batch: string[], fresh: boolean) => {
-      if (!batch.length || cancel) return;
-      const res = await loadQuotes(batch, fresh, period);
-      if (cancel) return;
-      setQuotes((prev) => {
-        const next = { ...prev };
-        for (const quote of res.quotes) next[quote.symbol] = quote;
-        try {
-          // Other tabs keep their own symbols in the same cache; merge, don't replace.
-          const stored = JSON.parse(sessionStorage.getItem(storageKey(period)) ?? "{}") as {
-            quotes?: Record<string, Quote>;
-          };
-          sessionStorage.setItem(
-            storageKey(period),
-            JSON.stringify({ at: res.asOf, quotes: { ...stored.quotes, ...next } }),
-          );
-        } catch {
-          /* quota */
-        }
-        return next;
-      });
-      setAsOf(res.asOf);
-      setStatus("live");
-    };
-
     const load = async (fresh: boolean) => {
       setStatus((current) => (current === "live" ? "live" : "loading"));
       const batches = [list.slice(0, 40), list.slice(40, 180), list.slice(180)];
-      let any = false;
+      const received: Quote[] = [];
+      let at: number | null = null;
       let failed = false;
       for (const batch of batches) {
         if (cancel || !batch.length) continue;
         try {
-          await pull(batch, fresh && !any);
-          any = true;
+          const res = await loadQuotes(batch, fresh);
+          received.push(...res.quotes);
+          at = res.asOf;
+          // Market maps retain progressive rendering; portfolio totals wait
+          // for every batch so fresh and old sessions cannot be mixed.
+          if (!cancel && !waitForAll) {
+            setQuotes((previous) => replaceQuoteBatch(previous, batch, res.quotes));
+          }
         } catch {
           failed = true;
         }
       }
-      if (!cancel && !any && failed) setStatus("error");
+      if (cancel) return;
+      // Commit one refresh atomically: never mix a new benchmark with old
+      // holdings from another batch, and remove missing/failed batch quotes.
+      const next = replaceQuoteBatch({}, list, received);
+      setQuotes(next);
+      setAsOf(at);
+      setStatus(failed || !received.length ? "error" : "live");
+      try {
+        // Other tabs keep their own symbols in the same cache; merge, don't replace.
+        const stored = JSON.parse(sessionStorage.getItem(STORAGE) ?? "{}") as {
+          quotes?: Record<string, Quote>;
+        };
+        const merged = { ...stored.quotes };
+        for (const symbol of list) delete merged[symbol];
+        sessionStorage.setItem(STORAGE, JSON.stringify({ at, quotes: { ...merged, ...next } }));
+      } catch {
+        /* quota */
+      }
     };
 
     // Poll on a timer that adapts to the session, and stop entirely while the
@@ -131,7 +131,7 @@ export function useQuotes(symbols: string[], refreshToken: number, period: Perio
       document.removeEventListener("visibilitychange", onVisibility);
       unsubscribe();
     };
-  }, [key, refreshToken, period]);
+  }, [key, refreshToken, waitForAll]);
 
   return { quotes, asOf, status };
 }

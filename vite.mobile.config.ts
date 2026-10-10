@@ -1,6 +1,6 @@
 // Static client-only build for the Android app (Capacitor). The web build in
-// vite.config.ts is untouched; this one has no server, so quote fetching is
-// swapped for the native-HTTP version.
+// vite.config.ts is untouched; this one has no server, so quote and history
+// fetching are swapped for the native-HTTP versions.
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import viteReact from "@vitejs/plugin-react";
@@ -19,6 +19,7 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: "@/lib/quote-source", replacement: `${src}/lib/quote-source.native.ts` },
+      { find: "@/lib/history-source", replacement: `${src}/lib/history-source.native.ts` },
       { find: /^@\//, replacement: `${src}/` },
     ],
   },
