@@ -100,11 +100,13 @@ async function scenario(
   name,
   path,
   run,
-  { at = OPEN, width = 390, saved = v4(HOLDINGS), history = "ok" } = {},
+  { at = OPEN, width = 390, saved = v4(HOLDINGS), history = "ok", touch = false } = {},
 ) {
   const context = await browser.newContext({
     viewport: { width, height: 844 },
     colorScheme: "dark",
+    hasTouch: touch,
+    isMobile: touch,
   });
   await context.clock.setFixedTime(at);
   const page = await context.newPage();
@@ -189,34 +191,54 @@ const waitLabel = (page, symbol, text) =>
     [symbol, text],
   );
 const text = (page, value) => page.getByText(value, { exact: true }).first().waitFor();
-const change = (page) => page.getByTestId("portfolio-change").innerText();
-const waitChange = (page, pattern) =>
-  page.waitForFunction(
-    (source) =>
-      new RegExp(source).test(
-        document.querySelector('[data-testid="portfolio-change"]')?.textContent ?? "",
-      ),
-    pattern.source,
-  );
+const day = (page) => page.getByTestId("day-section");
+const pill = (page) => page.getByTestId("map-pill");
+const waitText = (locator, pattern) => locator.filter({ hasText: pattern }).first().waitFor();
+const SATURDAY = new Date("2026-10-10T15:00:00Z");
+const PRE_MARKET = new Date("2026-10-07T12:00:00Z"); // Wed 08:00 ET
+const PARTIAL = v4([...HOLDINGS, shares("ZZZZ", 1)]);
+
+/** Hold the universe title with real touch events (the phone's path). */
+async function touchHold(page, dy, release = true) {
+  const box = await page.getByRole("button", { name: /Choose a market/ }).boundingBox();
+  const x = box.x + 50;
+  const y = box.y + box.height / 2;
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+  await page.waitForTimeout(650);
+  for (let step = 1; step <= 6; step++)
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ x, y: y + (dy * step) / 6 }],
+    });
+  if (release) await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+}
 
 try {
   await scenario(
-    "Map 1D: index level, breadth, tabs; no history request",
+    "Map header: title, Search and controls; level with a compact pill; no history at 1D",
     "/",
     async (page, { historyBodies }) => {
       await text(page, "4,040.00");
-      await text(page, "▲ 40.00 (1.00%)");
-      await page.getByText(/^Index · today$/).waitFor();
+      await waitText(pill(page), /^▲ 1\.00%$/);
       await waitLabel(page, "AAPL", "+10.00%");
       await page.getByText(/^\d+ up$/).waitFor();
       for (const name of ["Map", "Sectors", "Portfolio"]) await tab(page, name).waitFor();
+      const header = page.locator("header").first();
+      await header.getByRole("button", { name: "Search" }).waitFor();
+      await header.getByRole("button", { name: "Map controls" }).waitFor();
+      assert.equal(await header.getByRole("button", { name: "Settings" }).count(), 0);
+      assert.equal(await page.getByText(/^Index · /).count(), 0);
+      // The heatmap starts well above where the golden header ended (~205px).
+      const first = await page.locator("button.tile").first().boundingBox();
+      assert.ok(first.y < 175, `heatmap starts at ${first.y}px`);
       assert.equal(historyBodies.length, 0);
       await page.screenshot({ path: `${shots}/app-map-1d.png` });
     },
   );
 
   await scenario(
-    "Map periods: index and tiles from reference closes; missing stays missing",
+    "Map periods: index pill and tiles from reference closes; missing stays missing",
     "/?board=dow",
     async (page, { historyBodies }) => {
       await waitLabel(page, "AAPL", "+10.00%");
@@ -228,7 +250,6 @@ try {
       // CVX has no 1W reference close: shown as waiting, never as 0%.
       assert.match((await tile(page, "CVX").getAttribute("aria-label")) ?? "", /—$/);
       assert.match((await tile(page, "CVX").getAttribute("class")) ?? "", /heat-wait/);
-      // JPM's reference equals its price: a real flat move.
       await waitLabel(page, "JPM", "0.00%");
       assert.match((await tile(page, "JPM").getAttribute("class")) ?? "", /heat-flat/);
       for (const body of historyBodies) assert.match(body, /2026-10-07/);
@@ -245,13 +266,12 @@ try {
   );
 
   await scenario(
-    "S&P index pill over 1W, and a sector drill keeps its context",
+    "S&P pill over 1W, and a sector drill keeps its context",
     "/?t=1w",
     async (page) => {
       await text(page, "4,040.00");
       // (4040 − 3900) / 3900
-      await text(page, "▲ 140.00 (3.59%)");
-      await page.getByText(/^Index · past week$/).waitFor();
+      await waitText(pill(page), /^▲ 3\.59%$/);
       await page
         .getByRole("button", { name: /^Technology/ })
         .first()
@@ -264,6 +284,72 @@ try {
       );
       await waitLabel(page, "MSFT", "+4.65%");
     },
+  );
+
+  await scenario(
+    "Map controls: filter with a visible dot, data status, Settings",
+    "/",
+    async (page) => {
+      await waitLabel(page, "XOM", "-10.00%");
+      await page.getByRole("button", { name: "Map controls" }).click();
+      const sheet = page.getByRole("dialog", { name: "Map Controls" });
+      await sheet.getByText("Last update").waitFor();
+      await sheet.getByText("Market Open").waitFor();
+      await sheet.getByRole("button", { name: /Advancers/ }).click();
+      await page.getByRole("button", { name: "Map controls, filter on" }).waitFor();
+      await waitLabel(page, "AAPL", "+10.00%");
+      assert.equal(await tile(page, "XOM").count(), 0);
+      await page.getByRole("button", { name: "Map controls, filter on" }).click();
+      await page
+        .getByRole("dialog", { name: "Map Controls" })
+        .getByRole("button", { name: "Settings" })
+        .click();
+      await page.getByRole("dialog", { name: "Settings" }).waitFor();
+    },
+  );
+
+  await scenario("Quick wheel: tap browses, hold-drag-release switches", "/", async (page) => {
+    const title = page.getByRole("button", { name: /Choose a market/ });
+    await title.click();
+    const menu = page.getByRole("dialog", { name: "Markets" });
+    await menu.getByText("Tip: press and hold the title to switch quickly.").waitFor();
+    await menu.getByRole("button", { name: "Close" }).click();
+    const box = await title.boundingBox();
+    const x = box.x + 50;
+    const y = box.y + box.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.waitForTimeout(650);
+    await page.getByRole("listbox", { name: "Quick switch" }).waitFor();
+    // Two rows down the list: S&P 500 → Nasdaq 100 → Dow 30.
+    await page.mouse.move(x, y - 40, { steps: 4 });
+    await page.mouse.move(x, y - 88, { steps: 4 });
+    await page.screenshot({ path: `${shots}/app-wheel.png` });
+    await page.mouse.up();
+    await page.waitForURL(/board=dow/);
+    assert.equal(await page.getByRole("listbox", { name: "Quick switch" }).count(), 0);
+    assert.equal(await page.getByRole("dialog", { name: "Markets" }).count(), 0);
+  });
+
+  await scenario(
+    "Quick wheel by touch: hold and release stays open; Escape cancels; tap switches",
+    "/",
+    async (page) => {
+      await touchHold(page, 0);
+      const wheel = page.getByRole("listbox", { name: "Quick switch" });
+      await wheel.waitFor();
+      await page.getByText("Tap to switch").waitFor();
+      assert.equal(await page.getByRole("dialog", { name: "Markets" }).count(), 0);
+      await page.keyboard.press("Escape");
+      await wheel.waitFor({ state: "detached" });
+      assert.doesNotMatch(page.url(), /board=/);
+      await touchHold(page, -44);
+      await page.waitForURL(/board=ndx/);
+      await touchHold(page, 0);
+      await page.getByRole("option", { name: /Technology/ }).click();
+      await page.waitForURL(/board=xlk/);
+    },
+    { touch: true },
   );
 
   await scenario(
@@ -281,150 +367,188 @@ try {
       await page.waitForURL(
         (u) => u.searchParams.get("tab") === "sectors" && u.searchParams.get("t") === "1w",
       );
-      // (2.5 × 5 + 0.75 × −20 + 0) / (2.5 × 105 + 0.75 × 200 + 202)
       await you.getByText("-0.41%").waitFor();
       await you.getByText("Current-holdings lookback").waitFor();
-      await page.getByText("+3.59%", { exact: true }).waitFor();
       await pick(page, "YTD");
-      // JPM has no YTD close, so there is no full figure.
       await you.getByText("—").waitFor();
     },
   );
 
   await scenario(
-    "Portfolio 1D: value, P&L and return; Today card and sheet",
+    "Portfolio: value card, TODAY section, positions; the day's P&L shows once",
     "/?tab=portfolio",
     async (page) => {
-      await text(page, "$612.00");
-      await waitChange(page, /▲ \$12\.00 \(2\.00%\) · today/);
-      const card = page.getByRole("button", { name: "Open My Portfolio Today" });
-      await card.getByText("+$12.00").waitFor();
+      const card = page.getByTestId("value-card");
+      await card.getByText("$612.00").waitFor();
+      // JPM has no average cost: no since-entry aggregate, just what's missing.
+      await card.getByText("Since entry: average cost on 2 of 3 positions").waitFor();
+      assert.doesNotMatch(await card.innerText(), /\+\$12\.00|today/i);
+      await day(page)
+        .getByText(/^Today$/i)
+        .waitFor();
+      await waitText(page.getByTestId("day-headline"), /^\+\$12\.00$/);
       assert.match(
-        await card.innerText(),
-        /\+2\.00% · \+1\.00 pts vs S&P 500 · 2 of 3 holdings up/,
+        await page.getByTestId("day-line").innerText(),
+        /^\+2\.00% · \+1\.00 pts vs S&P 500$/,
       );
-      await page.screenshot({ path: `${shots}/app-portfolio-1d.png` });
-      await card.click();
-      const sheet = page.getByRole("dialog", { name: "My Portfolio Today" });
-      await sheet.getByText("Day P&L").waitFor();
-      const body = await sheet.innerText();
-      assert.match(body, /\+\$12\.00/);
-      assert.match(body, /\+2\.00%/);
-      assert.match(body, /\+1\.00 pts/);
-      assert.match(body, /Top contributors[\s\S]*AAPL[\s\S]*\+\$25\.00/i);
-      assert.match(body, /Top detractors[\s\S]*XOM[\s\S]*−\$15\.00/i);
-      assert.match(body, /Since entry[\s\S]*\+\$97\.50 \(\+31\.20%\)/i);
-      await page.screenshot({ path: `${shots}/app-today-sheet.png` });
+      const body = await day(page).innerText();
+      assert.match(body, /AAPL[\s\S]*\+\$25\.00/);
+      assert.match(body, /XOM[\s\S]*−\$15\.00/);
+      assert.match(body, /2 of 3 up · 1 down/);
+      assert.match(body, /Technology[\s\S]*\+\$25\.00/);
+      // Live TODAY is lighter: no summary sentence, no market context.
+      assert.equal(await page.getByTestId("day-market").count(), 0);
+      const screen = await page.locator("main").innerText();
+      assert.equal(screen.split("+$12.00").length - 1, 1, "the day's P&L appears exactly once");
+      assert.equal(await page.locator("button.tile").count(), 0, "no heatmap on Portfolio");
+      assert.equal(await page.getByRole("radiogroup", { name: "Time frame" }).count(), 0);
+      assert.match(screen, /3 positions[\s\S]*XOM[\s\S]*−\$15\.00 · -10\.00%/i);
+      assert.match(screen, /2\.5 shares · \+37\.50% since entry/);
+      await page.screenshot({ path: `${shots}/app-portfolio-today.png`, fullPage: true });
+      await day(page).getByRole("button", { name: "Show more" }).click();
+      await day(page).getByText("Financials").waitFor();
     },
   );
 
   await scenario(
-    "Portfolio periods: current-holdings lookback, per-position moves, since entry",
+    "Portfolio: since entry only when every position has a cost",
     "/?tab=portfolio",
     async (page) => {
-      await text(page, "$612.00");
-      await pick(page, "1W");
-      await waitChange(page, /▼ 0\.41% · current holdings, past week/);
-      await pick(page, "1M");
-      // (2.5 × −15 + 0.75 × 10 + 12) / (2.5 × 125 + 0.75 × 170 + 190)
-      await waitChange(page, /▼ 2\.86% · current holdings, past month/);
-      await pick(page, "YTD");
-      await waitChange(page, /^2 of 3 have a YTD close$/);
-      await page.getByRole("radio", { name: "List" }).click();
-      const list = await page.locator("main").innerText();
-      // Per-position price moves only; no invented dollar history.
-      assert.match(list, /AAPL[\s\S]*\+25\.00%/);
-      assert.doesNotMatch(list, /AAPL[^\n]*\n[^\n]*\n[^\n]*\$[\d,.]+ · \+25\.00%/);
-      assert.match(list, /not your account’s past return/);
-      await pick(page, "All");
-      await waitChange(page, /▲ \$97\.50 \(31\.20%\) · since entry · 2 of 3 with a cost/);
-      await page.screenshot({ path: `${shots}/app-portfolio-all.png` });
+      // (2.5 × 30 + 0.75 × 30 + 22) / (200 + 112.5 + 180)
+      await waitText(page.getByTestId("since-entry"), /▲ \$119\.50 \(24\.26%\) · since entry/);
     },
+    { saved: v4([shares("AAPL", 2.5, 80), shares("XOM", 0.75, 150), shares("JPM", 1, 180)]) },
+  );
+
+  await scenario(
+    "Show heatmap opens the portfolio map; Back returns",
+    "/?tab=portfolio",
+    async (page) => {
+      await page.getByTestId("value-card").getByText("$612.00").waitFor();
+      await page.getByRole("button", { name: "Show heatmap" }).click();
+      await page.waitForURL(
+        (u) => u.searchParams.get("board") === "book" && !u.searchParams.has("tab"),
+      );
+      await waitLabel(page, "AAPL", "+10.00%");
+      await waitText(pill(page), /^\+\$12$/);
+      await page.goBack();
+      await page.waitForURL(/tab=portfolio/);
+      await page.getByTestId("value-card").waitFor();
+    },
+  );
+
+  await scenario(
+    "CLOSE: one-line summary without repeating the P&L, plus market context",
+    "/?tab=portfolio",
+    async (page) => {
+      await day(page)
+        .getByText(/^Close$/i)
+        .waitFor();
+      await waitText(page.getByTestId("day-headline"), /^\+\$12\.00$/);
+      assert.equal(
+        await page.getByTestId("day-line").innerText(),
+        "Up 2.00%, 1.00 pts ahead of the S&P 500. AAPL led.",
+      );
+      assert.equal(
+        await page.getByTestId("day-market").innerText(),
+        "Market · S&P 500 +1.00% · Technology led, Utilities lagged · mixed day",
+      );
+      assert.equal((await page.locator("main").innerText()).split("+$12.00").length - 1, 1);
+      assert.equal(
+        await page.getByRole("button", { name: /Lattice Close|Portfolio Today/ }).count(),
+        0,
+      );
+      await page.screenshot({ path: `${shots}/app-portfolio-close.png`, fullPage: true });
+    },
+    { at: AFTER_CLOSE },
+  );
+
+  await scenario(
+    "LAST CLOSE · FRI on a Saturday",
+    "/?tab=portfolio",
+    async (page) => {
+      await day(page)
+        .getByText(/^Last close · Fri$/i)
+        .waitFor();
+      await page.getByTestId("day-market").waitFor();
+      await page.screenshot({ path: `${shots}/app-portfolio-last-close.png`, fullPage: true });
+    },
+    { at: SATURDAY },
+  );
+
+  await scenario(
+    "LAST CLOSE · TUE before Wednesday's open",
+    "/?tab=portfolio",
+    async (page) => {
+      await day(page)
+        .getByText(/^Last close · Tue$/i)
+        .waitFor();
+    },
+    { at: PRE_MARKET },
   );
 
   await scenario(
     "Partial coverage never reads as a full return",
     "/?tab=portfolio",
     async (page) => {
-      await page.getByText("Priced value · 3 of 4", { exact: false }).waitFor();
-      await waitChange(page, /▲ \$12\.00 known · 3 of 4 priced/);
-      assert.doesNotMatch(await change(page), /%/);
-      await page.getByRole("button", { name: "Open My Portfolio Today" }).click();
-      const body = await page.getByRole("dialog", { name: "My Portfolio Today" }).innerText();
-      assert.match(body, /Partial data\./);
-      assert.match(body, /missing ZZZZ/);
-      assert.match(body, /Known P&L/);
-      assert.match(body, /Needs every holding priced/);
-      await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
+      await page
+        .getByTestId("value-card")
+        .getByText(/^Priced value · 3 of 4/)
+        .waitFor();
+      await waitText(page.getByTestId("day-headline"), /^\+\$12\.00$/);
+      assert.equal(
+        await page.getByTestId("day-line").innerText(),
+        "Known P&L · 3 of 4 priced · return once every position is priced",
+      );
+      assert.doesNotMatch(await page.getByTestId("day-line").innerText(), /%/);
+      await day(page)
+        .getByText(/Movers · priced positions/i)
+        .waitFor();
       await tab(page, "Sectors").click();
       const you = page.getByRole("button", { name: /Main\s*You/ });
       await you.getByText("Your portfolio · partial").waitFor();
       await you.getByText("—").waitFor();
-      await tab(page, "Map").click();
     },
-    { saved: v4([...HOLDINGS, shares("ZZZZ", 1)]) },
+    { saved: PARTIAL },
   );
 
   await scenario(
-    "Portfolio on the map: engine figures, partial flagged",
+    "Portfolio on the map: engine figures, partial flagged in the pill",
     "/?board=book",
     async (page) => {
-      await page.getByText(/^Your portfolio · today · 3 of 4 priced/).waitFor();
-      await text(page, "+$12 known");
-      await text(page, "—");
+      await waitText(pill(page), /^\+\$12 known · 3 of 4$/);
+      await page.getByTestId("map-headline").getByText("—").waitFor();
     },
-    { saved: v4([...HOLDINGS, shares("ZZZZ", 1)]) },
+    { saved: PARTIAL },
   );
 
   await scenario(
-    "Lattice Close after the bell",
+    "Partial CLOSE: known dollars, no return",
     "/?tab=portfolio",
     async (page) => {
-      const card = page.getByRole("button", { name: "Open Lattice Close" });
-      await card.getByText("+$12.00").waitFor();
-      await card.click();
-      const sheet = page.getByRole("dialog", { name: "Lattice Close" });
-      await sheet.getByText(/^After the close/).waitFor();
-      const body = await sheet.innerText();
-      assert.match(body, /Your portfolio returned \+2\.00%, 1\.00 pts ahead of the S&P 500\./);
-      assert.match(
-        body,
-        /AAPL was the largest contributor; 2 up · 1 down · 0 flat among 3 priced holdings\./,
+      await day(page)
+        .getByText(/^Close$/i)
+        .waitFor();
+      assert.equal(
+        await page.getByTestId("day-line").innerText(),
+        "3 of 4 holdings priced, so no full return. AAPL led among priced holdings.",
       );
-      assert.match(body, /Market[\s\S]*S&P 500[\s\S]*\+1\.00%/i);
-      assert.match(body, /Led · Technology[\s\S]*\+2\.00%/);
-      assert.match(body, /Lagged · Utilities[\s\S]*-1\.20%/);
-      await page.screenshot({ path: `${shots}/app-close-sheet.png` });
-      await sheet.getByRole("button", { name: "Full details in My Portfolio Today" }).click();
-      await page.getByRole("dialog", { name: "My Portfolio Today" }).waitFor();
     },
-    { at: AFTER_CLOSE },
-  );
-
-  await scenario(
-    "Partial Lattice Close: known dollars, no return",
-    "/?tab=portfolio",
-    async (page) => {
-      await page.getByRole("button", { name: "Open Lattice Close" }).click();
-      const body = await page.getByRole("dialog", { name: "Lattice Close" }).innerText();
-      assert.match(body, /Partial close: \+\$12\.00 from 3 of 4 holdings with prices\./);
-      assert.match(body, /Known P&L/);
-      assert.doesNotMatch(body, /Your portfolio returned/);
-    },
-    { at: AFTER_CLOSE, saved: v4([...HOLDINGS, shares("ZZZZ", 1)]) },
+    { at: AFTER_CLOSE, saved: PARTIAL },
   );
 
   await scenario(
     "Percent portfolio: % only, exact daily return",
     "/?tab=portfolio",
     async (page) => {
-      await page.getByText(/^Percent-based portfolio/).waitFor();
+      await page
+        .getByTestId("value-card")
+        .getByText(/^Percent-based portfolio/)
+        .waitFor();
       // 60% of AAPL (+10%) and 40% of XOM (−10%), both anchored at their previous close.
-      await waitChange(page, /▲ 2\.00% · today/);
-      await page.getByRole("button", { name: "Open Lattice Close" }).click();
-      const body = await page.getByRole("dialog", { name: "Lattice Close" }).innerText();
-      assert.match(body, /covers share portfolios/);
-      assert.doesNotMatch(body, /\$/);
+      await waitText(page.getByTestId("day-headline"), /^\+2\.00%$/);
+      await page.getByTestId("day-market").waitFor();
+      assert.doesNotMatch(await day(page).innerText(), /\$/);
     },
     {
       at: AFTER_CLOSE,
@@ -439,8 +563,8 @@ try {
     "Migration: a holdings-build snapshot keeps every holding, and a raw backup",
     "/?tab=portfolio",
     async (page) => {
-      await text(page, "$612.00");
-      await waitChange(page, /▲ \$12\.00 \(2\.00%\) · today/);
+      await page.getByTestId("value-card").getByText("$612.00").waitFor();
+      await waitText(page.getByTestId("day-headline"), /^\+\$12\.00$/);
       const backup = await page.evaluate(() => localStorage.getItem("lattice-books-backup"));
       assert.match(backup ?? "", /averageCost/);
       const saved = JSON.parse(await page.evaluate(() => localStorage.getItem("lattice-books-v1")));
@@ -481,22 +605,21 @@ try {
     "Migration: an original weight book becomes percent positions and keeps its size",
     "/?tab=portfolio",
     async (page) => {
-      await page.getByText(/^Percent-based portfolio/).waitFor();
+      await page
+        .getByTestId("value-card")
+        .getByText(/^Percent-based portfolio/)
+        .waitFor();
       // No anchors yet: each position is pinned to the first price seen ($110,
       // $180), so the book is 60/40 now. Units 60/110 and 40/180 give
       // (60/110 × 10 − 40/180 × 20) / (60/110 × 100 + 40/180 × 200).
-      await waitChange(page, /▲ 1\.02% · today/);
+      await waitText(page.getByTestId("day-headline"), /^\+1\.02%$/);
       const saved = JSON.parse(await page.evaluate(() => localStorage.getItem("lattice-books-v1")));
       assert.equal(saved.state.books[0].notional, 10_000);
       assert.deepEqual(
-        saved.state.books[0].positions.map((p) => p.anchor),
-        [110, 180],
-      );
-      assert.deepEqual(
-        saved.state.books[0].positions.map((p) => [p.symbol, p.kind, p.percent]),
+        saved.state.books[0].positions.map((p) => [p.symbol, p.kind, p.percent, p.anchor]),
         [
-          ["AAPL", "percent", 60],
-          ["XOM", "percent", 40],
+          ["AAPL", "percent", 60, 110],
+          ["XOM", "percent", 40, 180],
         ],
       );
     },
@@ -527,7 +650,7 @@ try {
     async (page) => {
       await waitLabel(page, "AAPL", "+10.00%");
       await pick(page, "1W");
-      await page.getByText(/loading past week/).waitFor();
+      await waitText(pill(page), /^Loading 1W$/);
       for (const symbol of ["AAPL", "JPM", "MSFT"]) {
         assert.match((await tile(page, symbol).getAttribute("aria-label")) ?? "", /—$/);
         assert.match((await tile(page, symbol).getAttribute("class")) ?? "", /heat-wait/);
@@ -541,7 +664,7 @@ try {
     "History failure reads unavailable, never 0%",
     "/?board=dow&t=1m",
     async (page) => {
-      await page.getByText(/past month unavailable/).waitFor();
+      await waitText(pill(page), /^1M unavailable$/);
       for (const symbol of ["AAPL", "CVX", "JPM"]) {
         assert.match((await tile(page, symbol).getAttribute("aria-label")) ?? "", /—$/);
       }
@@ -555,10 +678,10 @@ try {
     "Desktop width",
     "/?t=1w",
     async (page) => {
-      await text(page, "▲ 140.00 (3.59%)");
+      await waitText(pill(page), /^▲ 3\.59%$/);
       await page.screenshot({ path: `${shots}/app-map-1w-desktop.png` });
       await tab(page, "Portfolio").click();
-      await text(page, "$612.00");
+      await page.getByTestId("value-card").getByText("$612.00").waitFor();
     },
     { width: 1280 },
   );

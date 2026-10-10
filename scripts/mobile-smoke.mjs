@@ -12,9 +12,17 @@ import { extname, join, normalize } from "node:path";
 import { chromium } from "playwright";
 
 const ROOT = new URL("../dist-mobile/", import.meta.url).pathname;
-const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml" };
+const TYPES = {
+  ".html": "text/html",
+  ".js": "text/javascript",
+  ".css": "text/css",
+  ".svg": "image/svg+xml",
+};
 const server = createServer(async (req, res) => {
-  const path = normalize(decodeURIComponent(new URL(req.url, "http://x").pathname)).replace(/^(\.\.[/\\])+/, "");
+  const path = normalize(decodeURIComponent(new URL(req.url, "http://x").pathname)).replace(
+    /^(\.\.[/\\])+/,
+    "",
+  );
   try {
     const body = await readFile(join(ROOT, path === "/" ? "index.html" : path));
     res.writeHead(200, { "content-type": TYPES[extname(path)] ?? "application/octet-stream" });
@@ -58,7 +66,12 @@ function yahoo(url) {
         close: [price],
       };
     } else {
-      const bars = BARS[symbol] ?? { "2025-12-31": 40, "2026-09-04": 45, "2026-09-30": 48, "2026-10-06": 50 };
+      const bars = BARS[symbol] ?? {
+        "2025-12-31": 40,
+        "2026-09-04": 45,
+        "2026-09-30": 48,
+        "2026-10-06": 50,
+      };
       const dates = Object.keys(bars).sort();
       out[symbol] = { symbol, timestamp: dates.map(at4pm), close: dates.map((d) => bars[d]) };
     }
@@ -72,7 +85,10 @@ const browser = await chromium.launch({
 });
 let passed = 0;
 async function scenario(name, hash, run) {
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: "dark" });
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    colorScheme: "dark",
+  });
   await context.clock.setFixedTime(NOW);
   // An Android user's saved portfolio from the APK build (v3 positions).
   await context.addInitScript(() => {
@@ -90,7 +106,16 @@ async function scenario(name, hash, run) {
     localStorage.setItem(
       "lattice-books-v1",
       JSON.stringify({
-        state: { books: [{ id: "main", name: "Main", positions: [p("AAPL", 2.5, 80), p("XOM", 0.75, 150), p("JPM", 1, null)] }], activeId: "main" },
+        state: {
+          books: [
+            {
+              id: "main",
+              name: "Main",
+              positions: [p("AAPL", 2.5, 80), p("XOM", 0.75, 150), p("JPM", 1, null)],
+            },
+          ],
+          activeId: "main",
+        },
         version: 3,
       }),
     );
@@ -109,7 +134,10 @@ async function scenario(name, hash, run) {
     }
     if (target.startsWith("https://query2.finance.yahoo.com/v8/finance/spark")) {
       yahooRanges.push(new URL(target).searchParams.get("range"));
-      return route.fulfill({ json: yahoo(target), headers: { "access-control-allow-origin": "*" } });
+      return route.fulfill({
+        json: yahoo(target),
+        headers: { "access-control-allow-origin": "*" },
+      });
     }
     const image = request.resourceType() === "image";
     return route.fulfill({
@@ -133,7 +161,9 @@ const tile = (page, symbol, text) =>
   page.waitForFunction(
     ([s, t]) =>
       [...document.querySelectorAll("button.tile[aria-label]")].some(
-        (b) => b.getAttribute("aria-label").startsWith(`${s} `) && b.getAttribute("aria-label").endsWith(t),
+        (b) =>
+          b.getAttribute("aria-label").startsWith(`${s} `) &&
+          b.getAttribute("aria-label").endsWith(t),
       ),
     [symbol, text],
   );
@@ -141,28 +171,38 @@ const tile = (page, symbol, text) =>
 try {
   await scenario("Map: live quotes parsed on the phone", "#/", async (page, { yahooRanges }) => {
     await page.getByText("4,040.00", { exact: true }).waitFor();
-    await page.getByText("▲ 40.00 (1.00%)", { exact: true }).waitFor();
+    await page.getByTestId("map-pill").getByText("▲ 1.00%", { exact: true }).waitFor();
     await tile(page, "AAPL", "+10.00%");
     assert.ok(yahooRanges.every((range) => range === "1d"));
   });
 
-  await scenario("1W and YTD from Yahoo daily history, computed on the phone", "#/?t=1w", async (page, { yahooRanges }) => {
-    await tile(page, "AAPL", "+4.76%");
-    await page.getByText("▲ 140.00 (3.59%)", { exact: true }).waitFor();
-    assert.ok(yahooRanges.includes("1y"));
-    await page.getByRole("radio", { name: "YTD", exact: true }).click();
-    await tile(page, "AAPL", "+25.00%");
-  });
+  await scenario(
+    "1W and YTD from Yahoo daily history, computed on the phone",
+    "#/?t=1w",
+    async (page, { yahooRanges }) => {
+      await tile(page, "AAPL", "+4.76%");
+      await page.getByTestId("map-pill").getByText("▲ 3.59%", { exact: true }).waitFor();
+      assert.ok(yahooRanges.includes("1y"));
+      await page.getByRole("radio", { name: "YTD", exact: true }).click();
+      await tile(page, "AAPL", "+25.00%");
+    },
+  );
 
-  await scenario("Portfolio: an APK v3 portfolio survives, Today from the engine", "#/?tab=portfolio", async (page) => {
-    await page.getByText("$612.00", { exact: true }).waitFor();
-    await page.getByText(/▲ \$12\.00 \(2\.00%\)/).waitFor();
-    const card = page.getByRole("button", { name: "Open My Portfolio Today" });
-    assert.match(await card.innerText(), /\+1\.00 pts vs S&P 500/);
-    const saved = JSON.parse(await page.evaluate(() => localStorage.getItem("lattice-books-v1")));
-    assert.equal(saved.version, 4);
-    assert.equal(saved.state.books[0].positions.length, 3);
-  });
+  await scenario(
+    "Portfolio: an APK v3 portfolio survives, its day from the engine",
+    "#/?tab=portfolio",
+    async (page) => {
+      await page.getByTestId("value-card").getByText("$612.00", { exact: true }).waitFor();
+      await page.getByTestId("day-headline").getByText("+$12.00", { exact: true }).waitFor();
+      assert.match(
+        await page.getByTestId("day-line").innerText(),
+        /^\+2\.00% · \+1\.00 pts vs S&P 500$/,
+      );
+      const saved = JSON.parse(await page.evaluate(() => localStorage.getItem("lattice-books-v1")));
+      assert.equal(saved.version, 4);
+      assert.equal(saved.state.books[0].positions.length, 3);
+    },
+  );
 
   console.log(`${passed} mobile scenarios passed`);
 } finally {
