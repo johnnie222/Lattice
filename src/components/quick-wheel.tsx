@@ -12,6 +12,7 @@ import { ChevronDown } from "lucide-react";
 import { LargeTitle } from "@/components/chrome";
 import { hapticClose, hapticOpen, hapticTick } from "@/lib/haptics";
 import { markWheelUsed } from "@/lib/quick-wheel-hint";
+import { useDismissible } from "@/lib/use-dismissible";
 import type { Universe } from "@/lib/universes";
 
 // The universe title: tap opens the Markets menu (browse); press and hold
@@ -51,6 +52,9 @@ const Wheel = forwardRef<
   );
   const [active, setActive] = useState(centred.current);
   const reduced = useRef(false);
+
+  // Android Back cancels the wheel like a tap outside.
+  useDismissible(onCancel);
 
   const indexAt = (top: number) => Math.min(items.length - 1, Math.max(0, Math.round(top / ITEM)));
 

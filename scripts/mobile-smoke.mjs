@@ -84,12 +84,43 @@ const browser = await chromium.launch({
   args: ["--no-sandbox"],
 });
 let passed = 0;
-async function scenario(name, hash, run) {
+// Android mode: Capacitor's own native-bridge.js (what the Android WebView
+// injects) over a fake androidBridge that records every native call, with
+// plugin headers for App so its calls go "native". Tests fire real
+// backButton events back through Capacitor.fromNative.
+const NATIVE_BRIDGE = await readFile(
+  new URL(
+    "../node_modules/@capacitor/android/capacitor/src/main/assets/native-bridge.js",
+    import.meta.url,
+  ),
+  "utf8",
+);
+
+async function scenario(name, hash, run, { android = false } = {}) {
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
     colorScheme: "dark",
   });
   await context.clock.setFixedTime(NOW);
+  if (android) {
+    await context.addInitScript(() => {
+      window.__native = [];
+      window.androidBridge = { postMessage: (data) => window.__native.push(JSON.parse(data)) };
+    });
+    await context.addInitScript({ content: NATIVE_BRIDGE });
+    await context.addInitScript(() => {
+      window.Capacitor.PluginHeaders = [
+        {
+          name: "App",
+          methods: [
+            { name: "addListener", rtype: "callback" },
+            { name: "removeListener", rtype: "callback" },
+            { name: "exitApp", rtype: "promise" },
+          ],
+        },
+      ];
+    });
+  }
   // An Android user's saved portfolio from the APK build (v3 positions).
   await context.addInitScript(() => {
     if (sessionStorage.getItem("seeded")) return;
@@ -202,6 +233,87 @@ try {
       assert.equal(saved.version, 4);
       assert.equal(saved.state.books[0].positions.length, 3);
     },
+  );
+
+  await scenario(
+    "Android Back: close the topmost overlay, else go back, else exit",
+    "#/?tab=portfolio",
+    async (page) => {
+      const calls = () =>
+        page.evaluate(() => window.__native.map((c) => `${c.pluginId}.${c.methodName}`));
+      // The app registered one backButton listener with the App plugin.
+      await page.waitForFunction(() =>
+        window.__native.some(
+          (c) =>
+            c.pluginId === "App" &&
+            c.methodName === "addListener" &&
+            c.options.eventName === "backButton",
+        ),
+      );
+      const back = (canGoBack) =>
+        page.evaluate((canGoBack) => {
+          const listen = window.__native.find(
+            (c) =>
+              c.pluginId === "App" &&
+              c.methodName === "addListener" &&
+              c.options.eventName === "backButton",
+          );
+          window.Capacitor.fromNative({
+            callbackId: listen.callbackId,
+            pluginId: "App",
+            methodName: "addListener",
+            success: true,
+            save: true,
+            data: { canGoBack },
+          });
+        }, canGoBack);
+      const exits = async () => (await calls()).filter((c) => c === "App.exitApp").length;
+      const hash = () => page.evaluate(() => location.hash);
+
+      // A sheet is open: Back closes it, even at the root, and nothing else.
+      await page.getByRole("button", { name: "Add position" }).click();
+      await page.getByRole("dialog", { name: "Add Position" }).waitFor();
+      await back(false);
+      await page.getByRole("dialog", { name: "Add Position" }).waitFor({ state: "detached" });
+      assert.equal(await exits(), 0);
+      assert.match(await hash(), /tab=portfolio/);
+
+      // Show heatmap pushes history. With Map controls open, Back closes them only.
+      await page.getByRole("button", { name: "Show heatmap" }).click();
+      await page.waitForFunction(
+        () => /board=book/.test(location.hash) && !/tab=/.test(location.hash),
+      );
+      await page.getByRole("button", { name: "Map controls" }).click();
+      await page.getByRole("dialog", { name: "Map Controls" }).waitFor();
+      await back(true);
+      await page.getByRole("dialog", { name: "Map Controls" }).waitFor({ state: "detached" });
+      assert.match(await hash(), /board=book/);
+
+      // The quick wheel is an overlay too.
+      const title = await page.getByRole("button", { name: /Choose a market/ }).boundingBox();
+      await page.mouse.move(title.x + 50, title.y + title.height / 2);
+      await page.mouse.down();
+      await page.waitForTimeout(650);
+      await page.mouse.up();
+      await page.getByRole("listbox", { name: "Quick switch" }).waitFor();
+      await back(true);
+      await page.getByRole("listbox", { name: "Quick switch" }).waitFor({ state: "detached" });
+      assert.match(await hash(), /board=book/);
+
+      // Nothing open and the WebView can go back: history.back() returns to Portfolio.
+      await back(true);
+      await page.waitForFunction(() => /tab=portfolio/.test(location.hash));
+      await page.getByTestId("value-card").waitFor();
+      assert.equal(await exits(), 0);
+
+      // At the root: exit the app.
+      await back(false);
+      await page.waitForFunction(() =>
+        window.__native.some((c) => c.pluginId === "App" && c.methodName === "exitApp"),
+      );
+      assert.equal(await exits(), 1);
+    },
+    { android: true },
   );
 
   console.log(`${passed} mobile scenarios passed`);

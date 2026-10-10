@@ -11,6 +11,7 @@ import {
 } from "@/lib/market";
 import type { Quote } from "@/lib/quote-core";
 import { UNIVERSE_GROUPS } from "@/lib/universes";
+import { useDismissible } from "@/lib/use-dismissible";
 import type { Book } from "@/store/books";
 import { Mark } from "@/components/mark";
 
@@ -25,6 +26,8 @@ export function Sheet({
   onClose: () => void;
   children: ReactNode;
 }) {
+  // Android Back closes the topmost sheet.
+  useDismissible(onClose);
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
       <button type="button" className="scrim absolute inset-0" aria-label="Close" onClick={onClose} />
