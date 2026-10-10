@@ -24,6 +24,18 @@ import {
   type MapNode,
 } from "@/lib/market";
 import { useQuotes } from "@/lib/use-quotes";
+import { useReferenceCloses } from "@/lib/use-reference-closes";
+import {
+  HEAT_SCALE,
+  isLookback,
+  PERIOD_LABEL,
+  PERIODS,
+  parsePeriod,
+  periodMove,
+  periodQuotes,
+  type Period,
+} from "@/lib/periods";
+import { latestSessionDate } from "@/lib/market-calendar";
 import { activeBook, useBooks } from "@/store/books";
 
 const DEFAULT_BOARD = "spx";
@@ -53,7 +65,7 @@ export function Lattice() {
   const drill = search.sector ?? null;
   const query = search.q ?? "";
   const setView = useCallback(
-    (next: { board?: string; sector?: SectorId | null; q?: string }) => {
+    (next: { board?: string; sector?: SectorId | null; q?: string; t?: Period }) => {
       void navigate({
         replace: true,
         search: (prev) => {
@@ -62,6 +74,7 @@ export function Lattice() {
             board: merged.board && merged.board !== DEFAULT_BOARD ? merged.board : undefined,
             sector: merged.sector ?? undefined,
             q: merged.q?.trim() ? merged.q : undefined,
+            t: merged.t && merged.t !== "1d" ? merged.t : undefined,
           };
         },
       });
@@ -70,6 +83,9 @@ export function Lattice() {
   );
   const setDrill = useCallback((sector: SectorId | null) => setView({ sector }), [setView]);
   const setQuery = useCallback((q: string) => setView({ q }), [setView]);
+  // The period changes only how moves are measured; board, sector and search stay.
+  const period = parsePeriod(search.t);
+  const setPeriod = useCallback((t: Period) => setView({ t }), [setView]);
   const [filter, setFilter] = useState<FilterId>("all");
   const [searchOpen, setSearchOpen] = useState(Boolean(search.q));
   const [sheet, setSheet] = useState<SheetId | null>(null);
@@ -122,6 +138,18 @@ export function Lattice() {
         : null,
     [bookResult, quotes],
   );
+  // Lookbacks compare the live price with a reference close from the history
+  // layer. Only display uses them (colour, move, filters, counts); tile sizes,
+  // Today and Close keep the live 1D quotes.
+  const session = clock?.session ?? "closed";
+  const anchor = useMemo(() => latestSessionDate(new Date()), [session]); // eslint-disable-line react-hooks/exhaustive-deps
+  const referenceSymbols = useMemo(() => rawNodes.map((node) => node.symbol), [rawNodes]);
+  const references = useReferenceCloses(referenceSymbols, period, anchor);
+  const displayQuotes = useMemo(
+    () => periodQuotes(quotes, period, references.references),
+    [quotes, period, references.references],
+  );
+  const lookback = isLookback(period);
   const baseNodes = useMemo(() => {
     if (bookResult) {
       const weights = bookTileWeights(book, bookResult);
@@ -134,19 +162,37 @@ export function Lattice() {
     return baseNodes.filter((node) => {
       if (drill && node.sector !== drill) return false;
       if (!matchesQuery(node, query)) return false;
-      return matchesMove(quotes[node.symbol]?.changePercent ?? null, filter);
+      return matchesMove(displayQuotes[node.symbol]?.changePercent ?? null, filter);
     });
-  }, [baseNodes, drill, query, filter, quotes]);
+  }, [baseNodes, drill, query, filter, displayQuotes]);
 
   const sectorCount = useMemo(() => new Set(visible.map((node) => node.sector)).size, [visible]);
   const grouped = !bookMode && board.grouped && !drill && !query && sectorCount > 1 && visible.length > 24;
   // In book mode the headline comes from the engine, which never presents a
   // partial book's return as complete; the map's weighted move would.
   const bookReturn = bookResult ? bookResult.analysis.returnPercent : null;
-  const move = bookMode ? bookReturn : weightedChange(visible.length ? visible : baseNodes, quotes);
-  const quoted = visible.filter((node) => quotes[node.symbol]);
-  const ups = quoted.filter((node) => (quotes[node.symbol]?.changePercent ?? 0) > 0.05).length;
-  const downs = quoted.filter((node) => (quotes[node.symbol]?.changePercent ?? 0) < -0.05).length;
+  // A lookback over a book would be a current-holdings lookback, not account
+  // performance; it isn't aggregated, only shown per holding on the tiles.
+  // A lookback headline waits for every batch, then says when it only covers
+  // the names that have a reference close (some missing, or some unavailable).
+  const lookbackMove = useMemo(
+    () =>
+      lookback && !bookMode && (references.status === "ready" || references.status === "error")
+        ? periodMove(visible.length ? visible : baseNodes, displayQuotes, priceWeighted)
+        : null,
+    [lookback, bookMode, references.status, visible, baseNodes, displayQuotes, priceWeighted],
+  );
+  const lookbackPartial = lookbackMove != null && lookbackMove.covered < lookbackMove.total;
+  const move = bookMode
+    ? lookback
+      ? null
+      : bookReturn
+    : lookback
+      ? (lookbackMove?.percent ?? null)
+      : weightedChange(visible.length ? visible : baseNodes, displayQuotes);
+  const quoted = visible.filter((node) => displayQuotes[node.symbol]?.changePercent != null);
+  const ups = quoted.filter((node) => (displayQuotes[node.symbol]?.changePercent ?? 0) > 0.05).length;
+  const downs = quoted.filter((node) => (displayQuotes[node.symbol]?.changePercent ?? 0) < -0.05).length;
 
   const title = bookMode ? book.name : drill ? sectorLabel(drill) : board.title;
   const subtitle = bookMode
@@ -204,7 +250,6 @@ export function Lattice() {
     [setDrill],
   );
 
-  const session = clock?.session ?? "closed";
   const now = Date.now();
   const stale = asOf != null && (status === "error" || now - asOf > STALE_MS[session]);
   const asOfLabel = asOf != null ? formatAsOf(asOf, now) : null;
@@ -255,12 +300,18 @@ export function Lattice() {
             )}
             <p className={`font-mono text-sm font-medium ${move == null ? "text-muted" : move >= 0 ? "text-up" : "text-down"}`}>
               {move != null
-                ? formatPct(move)
-                : bookPartial && quoted.length
-                  ? "Partial data"
-                  : status === "error"
-                    ? "Tape delayed"
-                    : "Loading tape"}
+                ? `${formatPct(move)}${lookback ? ` · ${PERIOD_LABEL[period]}${lookbackPartial ? " · partial" : ""}` : ""}`
+                : bookMode && lookback
+                  ? `${PERIOD_LABEL[period]} price moves`
+                  : lookback && references.status === "loading"
+                    ? `Loading ${PERIOD_LABEL[period]}`
+                    : lookback && references.status === "error"
+                      ? `${PERIOD_LABEL[period]} unavailable`
+                    : bookPartial && quoted.length
+                      ? "Partial data"
+                      : status === "error"
+                        ? "Tape delayed"
+                        : "Loading tape"}
             </p>
           </div>
           <button
@@ -293,6 +344,20 @@ export function Lattice() {
           ) : null}
 
         </p>
+        <div className="mt-1 flex justify-center" role="radiogroup" aria-label="Period">
+          {PERIODS.map((item) => (
+            <button
+              key={item}
+              type="button"
+              role="radio"
+              aria-checked={item === period}
+              onClick={() => setPeriod(item)}
+              className={`h-8 min-w-12 rounded-lg px-2 font-mono text-xs font-semibold ${item === period ? "bg-surface-2 text-fg" : "text-muted"}`}
+            >
+              {PERIOD_LABEL[item]}
+            </button>
+          ))}
+        </div>
         {bookResult && !bookEmpty ? (
           <div className="mt-2 flex gap-2">
             {closeMode ? (
@@ -351,7 +416,8 @@ export function Lattice() {
         ) : showMap ? (
           <Heatmap
             nodes={visible}
-            quotes={quotes}
+            quotes={displayQuotes}
+            heatScale={HEAT_SCALE[period]}
             grouped={grouped}
             selected={sheet === "stock" ? selected : null}
             onSelect={onSelect}
@@ -410,7 +476,8 @@ export function Lattice() {
         <StockSheet
           key={selected}
           symbol={selected}
-          quote={quotes[selected]}
+          quote={displayQuotes[selected]}
+          periodLabel={lookback ? PERIOD_LABEL[period] : null}
           node={baseNodes.find((node) => node.symbol === selected) ?? visible.find((node) => node.symbol === selected)}
           book={book}
           canDrill={!bookMode && board.grouped && !drill}

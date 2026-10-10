@@ -234,6 +234,7 @@ function BoardRow({
 export function StockSheet({
   symbol,
   quote,
+  periodLabel = null,
   node,
   book,
   canDrill,
@@ -242,6 +243,8 @@ export function StockSheet({
 }: {
   symbol: string;
   quote: Quote | undefined;
+  /** Set when the move shown is a lookback (e.g. "1W") rather than today's. */
+  periodLabel?: string | null;
   node: MapNode | undefined;
   book: Book;
   canDrill: boolean;
@@ -285,7 +288,11 @@ export function StockSheet({
         {quote ? formatPrice(quote.price) : "—"}
       </p>
       <p className={`mt-1 font-mono text-sm ${quote?.change != null ? (up ? "text-up" : "text-down") : "text-muted"}`}>
-        {quote?.change != null ? `${quote.change > 0 ? "+" : ""}${quote.change.toFixed(2)}  ${formatPct(quote.changePercent)}` : "Waiting on the tape"}
+        {quote?.change != null
+          ? `${quote.change > 0 ? "+" : ""}${quote.change.toFixed(2)}  ${formatPct(quote.changePercent)}${periodLabel ? ` · ${periodLabel}` : ""}`
+          : periodLabel
+            ? `No ${periodLabel} reference close`
+            : "Waiting on the tape"}
       </p>
       <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
         <div>
