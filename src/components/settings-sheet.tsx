@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { ListGroup, ListRow, Sheet } from "@/components/sheets";
 import { formatAsOf } from "@/lib/format";
-import { EMPTY_BOOK, useBooks } from "@/store/books";
+import { BOOKS_BACKUP_KEY, EMPTY_BOOK, useBooks } from "@/store/books";
 import { useSettings, type PaletteId, type RefreshPref, type ThemePref } from "@/store/settings";
 
 function Segmented<T extends string>({
@@ -98,7 +98,10 @@ export function SettingsSheet({
     useBooks.setState({ books: [EMPTY_BOOK], activeId: "main" });
     useSettings.setState({ theme: "system", palette: "classic", refresh: "auto" });
     try {
-      sessionStorage.removeItem("lattice-quotes-v1");
+      localStorage.removeItem(BOOKS_BACKUP_KEY);
+      for (const key of Object.keys(sessionStorage)) {
+        if (key.startsWith("lattice-quotes-") || key.startsWith("lattice-refs-")) sessionStorage.removeItem(key);
+      }
     } catch {
       /* storage blocked */
     }

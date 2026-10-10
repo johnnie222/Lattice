@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import type { SectorId } from "@/data/universe";
+import type { Period } from "@/lib/periods";
 import type { LatticeSearch } from "@/lib/view-search";
 
 export const DEFAULT_BOARD = "spx";
@@ -9,7 +10,7 @@ export type ViewPatch = {
   board?: string;
   sector?: SectorId | null;
   q?: string;
-  t?: "1d" | "1w" | "1m";
+  t?: Period;
   tab?: "map" | "sectors" | "portfolio";
 };
 
@@ -31,7 +32,7 @@ export function useView() {
             board: merged.board && merged.board !== DEFAULT_BOARD ? merged.board : undefined,
             sector: merged.sector ?? undefined,
             q: merged.q?.trim() ? merged.q : undefined,
-            t: merged.t === "1w" || merged.t === "1m" ? merged.t : undefined,
+            t: merged.t && merged.t !== "1d" ? merged.t : undefined,
           };
         },
       });

@@ -288,12 +288,14 @@ export function StockSheet({
       <p className="tabular mt-4 text-4xl font-semibold tracking-tight">
         {quote ? formatPrice(quote.price) : "—"}
       </p>
-      <p className={`mt-1 font-mono text-sm ${quote ? (up ? "text-up" : "text-down") : "text-muted"}`}>
-        {quote ? (
+      <p className={`mt-1 font-mono text-sm ${quote?.changePercent != null ? (up ? "text-up" : "text-down") : "text-muted"}`}>
+        {quote && quote.change != null && quote.changePercent != null ? (
           <>
             {`${quote.change > 0 ? "+" : ""}${quote.change.toFixed(2)}  ${formatPct(quote.changePercent)}`}
             <span className="text-muted"> · {periodWords}</span>
           </>
+        ) : quote ? (
+          `Move unavailable · ${periodWords}`
         ) : (
           "Waiting on the tape"
         )}

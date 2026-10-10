@@ -22,8 +22,9 @@ import {
   type MapNode,
 } from "@/lib/market";
 import { useQuotes } from "@/lib/use-quotes";
-import { PERIODS, type Period } from "@/lib/quote-core";
-import { valueBook } from "@/lib/portfolio";
+import { periodMove, type Period } from "@/lib/periods";
+import { analyzeBook, bookSymbols, bookTileWeights, holdingsLookback } from "@/lib/portfolio";
+import { PERIOD_OPTIONS, usePeriodQuotes, usePeriodWords } from "@/lib/use-period";
 import { DEFAULT_BOARD, useView } from "@/lib/use-view";
 import { activeBook, useBooks } from "@/store/books";
 
@@ -39,18 +40,6 @@ const SESSION_TEXT: Record<Session, string> = {
   closed: "Market Closed",
   holiday: "Market Holiday",
 };
-
-const PERIOD_WORDS: Record<Period, string> = {
-  "1d": "today",
-  "1w": "past week",
-  "1m": "past month",
-  ytd: "this year",
-  "1y": "past year",
-  "5y": "past 5 years",
-};
-
-export const PERIOD_OPTIONS = PERIODS.map((id) => ({ id, label: id.toUpperCase() }));
-export { PERIOD_WORDS };
 
 // Past this, quotes on screen are called out as delayed.
 const STALE_MS: Record<Session, number> = {
@@ -70,7 +59,7 @@ export function MapView() {
   const setDrill = useCallback((sector: SectorId | null) => setView({ sector }), [setView]);
   const setQuery = useCallback((q: string) => setView({ q }), [setView]);
   const period: Period = search.t ?? "1d";
-  const setPeriod = useCallback((t: Period) => setView({ t: t === "1w" || t === "1m" ? t : "1d" }), [setView]);
+  const setPeriod = useCallback((t: Period) => setView({ t }), [setView]);
   const [filter, setFilter] = useState<FilterId>("all");
   const [searchOpen, setSearchOpen] = useState(Boolean(search.q));
   const [sheet, setSheet] = useState<SheetId | null>(null);
@@ -88,8 +77,8 @@ export function MapView() {
   const rawNodes = useMemo(() => {
     if (bookMode) {
       // Sizes come from live values below; symbols must not depend on quotes.
-      return book.positions.map((p): MapNode => {
-        const listing = findListing(p.symbol) ?? syntheticListing(p.symbol);
+      return bookSymbols(book).map((symbol): MapNode => {
+        const listing = findListing(symbol) ?? syntheticListing(symbol);
         return {
           symbol: listing.symbol,
           name: listing.name,
@@ -101,7 +90,7 @@ export function MapView() {
       });
     }
     return boardNodes(board);
-  }, [bookMode, book.positions, board]);
+  }, [bookMode, book, board]);
 
   // Symbols come from the quote-independent nodes so price weighting can't
   // change the fetch key and restart polling.
@@ -111,31 +100,65 @@ export function MapView() {
     const list = [...rawNodes].sort((a, b) => b.weight - a.weight).map((node) => node.symbol);
     return bench ? [bench, ...list.filter((symbol) => symbol !== bench)] : list;
   }, [rawNodes, bench]);
-  const { quotes, asOf, status } = useQuotes(symbols, refreshToken, period);
+  // A portfolio commits one refresh at once, so fresh and old prices never mix.
+  const { quotes, asOf, status } = useQuotes(symbols, refreshToken, bookMode);
+  // Lookbacks compare each live price with its reference close. Only what's
+  // shown follows the period (colour, moves, filters, breadth); tile sizes
+  // stay on live 1D quotes.
+  const { display, status: periodStatus, lookback } = usePeriodQuotes(symbols, quotes, period, refreshToken);
   const priceWeighted = !bookMode && board.weighting === "price";
-  const valuation = useMemo(() => (bookMode ? valueBook(book, quotes) : null), [bookMode, book, quotes]);
+  const bookResult = useMemo(
+    () =>
+      bookMode
+        ? analyzeBook(book, quotes, Object.fromEntries(rawNodes.map((node) => [node.symbol, node.sector])))
+        : null,
+    [bookMode, book, quotes, rawNodes],
+  );
   const baseNodes = useMemo(() => {
-    if (valuation) {
-      const weight = new Map(valuation.holdings.map((h) => [h.symbol, h.weight]));
+    if (bookResult) {
+      const weight = bookTileWeights(book, bookResult, quotes);
       return rawNodes.map((node) => ({ ...node, weight: weight.get(node.symbol) ?? 0 })).filter((n) => n.weight > 0);
     }
     return priceWeighted ? applyPriceWeights(rawNodes, quotes) : rawNodes;
-  }, [valuation, priceWeighted, rawNodes, quotes]);
+  }, [bookResult, book, priceWeighted, rawNodes, quotes]);
 
   const visible = useMemo(() => {
     return baseNodes.filter((node) => {
       if (drill && node.sector !== drill) return false;
       if (!matchesQuery(node, query)) return false;
-      return matchesMove(quotes[node.symbol]?.changePercent ?? null, filter);
+      return matchesMove(display[node.symbol]?.changePercent ?? null, filter);
     });
-  }, [baseNodes, drill, query, filter, quotes]);
+  }, [baseNodes, drill, query, filter, display]);
 
   const sectorCount = useMemo(() => new Set(visible.map((node) => node.sector)).size, [visible]);
   const grouped = !bookMode && board.grouped && !drill && !query && sectorCount > 1 && visible.length > 24;
-  const move = weightedChange(visible.length ? visible : baseNodes, quotes);
-  const quoted = visible.filter((node) => quotes[node.symbol]);
-  const ups = quoted.filter((node) => (quotes[node.symbol]?.changePercent ?? 0) > 0.05).length;
-  const downs = quoted.filter((node) => (quotes[node.symbol]?.changePercent ?? 0) < -0.05).length;
+  const shown = visible.length ? visible : baseNodes;
+  // Weighted move of what's on screen. A lookback only reports once every
+  // batch is in, and says when it covers only the names with a reference close.
+  const lookbackMove = useMemo(
+    () => (lookback && !bookMode && periodStatus !== "loading" ? periodMove(shown, display, priceWeighted) : null),
+    [lookback, bookMode, periodStatus, shown, display, priceWeighted],
+  );
+  const marketMove = lookback ? (lookbackMove?.percent ?? null) : weightedChange(shown, display);
+  const marketPartial = lookbackMove != null && lookbackMove.covered < lookbackMove.total;
+  // A portfolio's move comes from the engine: a full return only when every
+  // position is priced. Lookbacks are the current holdings' move, not the
+  // account's history, and only when every position has a reference close.
+  const bookLookback = useMemo(
+    () => (bookMode && lookback && periodStatus !== "loading" ? holdingsLookback(book, display) : null),
+    [bookMode, lookback, periodStatus, book, display],
+  );
+  const bookMove = !bookResult
+    ? null
+    : lookback
+      ? bookLookback?.percent != null && bookLookback.covered === bookLookback.total
+        ? bookLookback.percent
+        : null
+      : bookResult.analysis.returnPercent;
+  const move = bookMode ? bookMove : marketMove;
+  const quoted = visible.filter((node) => display[node.symbol]?.changePercent != null);
+  const ups = quoted.filter((node) => (display[node.symbol]?.changePercent ?? 0) > 0.05).length;
+  const downs = quoted.filter((node) => (display[node.symbol]?.changePercent ?? 0) < -0.05).length;
 
   const title = bookMode ? book.name : drill ? sectorLabel(drill) : boardTitle(board);
 
@@ -188,18 +211,22 @@ export function MapView() {
   const now = Date.now();
   const stale = asOf != null && (status === "error" || now - asOf > STALE_MS[session]);
   const asOfLabel = asOf != null ? formatAsOf(asOf, now) : null;
-  const total = valuation?.total ?? null;
-  const pnl = bookMode && total != null && move != null ? total - total / (1 + move / 100) : null;
+  const holdings = bookResult?.kind === "holdings" ? bookResult.analysis : null;
+  // Known dollars today; flagged when not every holding is priced.
+  const pnl = holdings && !lookback ? holdings.dayChange : null;
   const showMap = visible.length > 0;
   const bookEmpty = bookMode && book.positions.length === 0;
 
   // Headline: the real index level / fund price when we have it; otherwise
   // the weighted move of what's on screen.
-  const benchQuote = bench && !drill ? quotes[bench] : undefined;
+  const benchQuote = bench && !drill ? display[bench] : undefined;
   const headPct = benchQuote ? benchQuote.changePercent : move;
   const headUp = (headPct ?? 0) >= 0;
+  const words = usePeriodWords(period);
   const baseCaption = bookMode
-    ? "Your portfolio"
+    ? lookback
+      ? "Current holdings"
+      : "Your portfolio"
     : drill
       ? `${board.title} · ${sectorLabel(drill)}`
       : benchQuote
@@ -207,7 +234,20 @@ export function MapView() {
           ? "Index"
           : `${board.title} fund`
         : "Weighted move";
-  const caption = `${baseCaption} · ${PERIOD_WORDS[period]}`;
+  const coverage = bookMode
+    ? lookback
+      ? bookLookback && bookLookback.covered < bookLookback.total
+        ? ` · ${bookLookback.covered} of ${bookLookback.total} with a close`
+        : ""
+      : bookResult && !bookResult.analysis.complete && symbols.length
+        ? holdings
+          ? ` · ${holdings.coverage.priced} of ${holdings.coverage.holdings} priced`
+          : " · partial"
+        : ""
+    : !benchQuote && marketPartial && lookbackMove
+      ? ` · ${lookbackMove.covered} of ${lookbackMove.total} priced`
+      : "";
+  const caption = `${baseCaption} · ${lookback && periodStatus === "loading" ? `loading ${words}` : lookback && periodStatus === "error" && headPct == null ? `${words} unavailable` : words}${coverage}`;
   const updated = asOfLabel
     ? stale
       ? `Delayed ${asOfLabel}`
@@ -283,16 +323,16 @@ export function MapView() {
             <span className="tabular text-[34px] font-semibold leading-tight tracking-tight">
               {benchQuote ? formatLevel(benchQuote.price) : headPct != null ? formatPct(headPct) : "—"}
             </span>
-            {headPct != null && (benchQuote || pnl != null) ? (
+            {(benchQuote && benchQuote.change != null && benchQuote.changePercent != null) || pnl != null ? (
               <span
-                className={`tabular shrink-0 rounded-full px-2.5 py-1 text-[13px] font-semibold ${headUp ? "text-up" : "text-down"}`}
+                className={`tabular shrink-0 rounded-full px-2.5 py-1 text-[13px] font-semibold ${(benchQuote ? headUp : (pnl ?? 0) >= 0) ? "text-up" : "text-down"}`}
                 style={{
-                  background: `color-mix(in srgb, ${headUp ? "var(--up-text)" : "var(--dn-text)"} 16%, transparent)`,
+                  background: `color-mix(in srgb, ${(benchQuote ? headUp : (pnl ?? 0) >= 0) ? "var(--up-text)" : "var(--dn-text)"} 16%, transparent)`,
                 }}
               >
-                {benchQuote
+                {benchQuote && benchQuote.change != null && benchQuote.changePercent != null
                   ? `${benchQuote.change >= 0 ? "▲" : "▼"} ${Math.abs(benchQuote.change).toFixed(2)} (${Math.abs(benchQuote.changePercent).toFixed(2)}%)`
-                  : formatDollars(pnl ?? 0)}
+                  : `${formatDollars(pnl ?? 0)}${holdings && !holdings.complete ? " known" : ""}`}
               </span>
             ) : null}
           </div>
@@ -364,7 +404,7 @@ export function MapView() {
         ) : showMap ? (
           <Heatmap
             nodes={visible}
-            quotes={quotes}
+            quotes={display}
             period={period}
             grouped={grouped}
             selected={sheet === "stock" ? selected : null}
@@ -429,8 +469,8 @@ export function MapView() {
         <StockSheet
           key={selected}
           symbol={selected}
-          quote={quotes[selected]}
-          periodWords={PERIOD_WORDS[period]}
+          quote={display[selected]}
+          periodWords={words}
           node={baseNodes.find((node) => node.symbol === selected) ?? visible.find((node) => node.symbol === selected)}
           book={book}
           onPosition={() => setSheet("position")}

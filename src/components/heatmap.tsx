@@ -3,7 +3,8 @@ import { ChevronRight } from "lucide-react";
 import { sectorLabel, type SectorId } from "@/data/universe";
 import { formatPct, formatPrice, heatClass } from "@/lib/format";
 import type { MapNode } from "@/lib/market";
-import type { Period, Quote } from "@/lib/quote-core";
+import { HEAT_SCALE, type Period } from "@/lib/periods";
+import type { Quote } from "@/lib/quote-core";
 import { treemap, treemapGrouped, type TileRect } from "@/lib/treemap";
 import { Mark } from "@/components/mark";
 
@@ -90,7 +91,7 @@ function Tile({
       tabIndex={w >= 64 && h >= 48 ? 0 : -1}
       aria-label={`${node.symbol}${node.name !== node.symbol ? ` ${node.name}` : ""}${quote ? ` ${formatPrice(quote.price)} ${formatPct(quote.changePercent)}` : ""}`}
       onClick={() => onSelect(node.symbol)}
-      className={`tile absolute overflow-hidden ${heatClass(quote?.changePercent ?? null, period)} ${selected ? "tile-selected" : ""}`}
+      className={`tile absolute overflow-hidden ${heatClass(quote?.changePercent ?? null, HEAT_SCALE[period])} ${selected ? "tile-selected" : ""}`}
       style={{ left: rect.x + GAP, top: rect.y + GAP, width: w, height: h, borderRadius: radius }}
     >
       <span

@@ -4,10 +4,10 @@ import { BOARDS } from "@/data/universe";
 import { GlassButton, LargeTitle, Segmented } from "@/components/chrome";
 import { InfoSheet } from "@/components/sheets";
 import { SettingsSheet } from "@/components/settings-sheet";
-import { PERIOD_OPTIONS, PERIOD_WORDS } from "@/components/map-view";
 import { formatAsOf, formatPct, heatClass } from "@/lib/format";
-import { periodChange, valueBook } from "@/lib/portfolio";
-import type { Period } from "@/lib/quote-core";
+import { HEAT_SCALE, type Period } from "@/lib/periods";
+import { analyzeBook, BENCHMARK_SYMBOL, holdingsLookback } from "@/lib/portfolio";
+import { PERIOD_OPTIONS, usePeriodQuotes, usePeriodWords } from "@/lib/use-period";
 import { useQuotes } from "@/lib/use-quotes";
 import { useView } from "@/lib/use-view";
 import { activeBook, useBooks } from "@/store/books";
@@ -25,7 +25,9 @@ const RANKED = BOARDS.filter((board) => board.group !== "Index");
 /**
  * Every sector fund and theme, plus your portfolio, ranked by their move
  * over the chosen window. The S&P 500 is drawn as a line through the list,
- * so everything above it beat the market.
+ * so everything above it beat the market. Your row is today's return from
+ * the portfolio engine (only when every position is priced); for 1W, 1M and
+ * YTD it is a current-holdings lookback, never your account's history.
  */
 export function SectorsView() {
   const { search, setView } = useView();
@@ -38,29 +40,44 @@ export function SectorsView() {
   const book = activeBook({ books, activeId });
 
   const symbols = useMemo(
-    () => [...new Set(["^GSPC", ...RANKED.map((board) => board.title), ...book.positions.map((p) => p.symbol)])],
+    () => [
+      ...new Set([BENCHMARK_SYMBOL, ...RANKED.map((board) => board.title), ...book.positions.map((p) => p.symbol)]),
+    ],
     [book.positions],
   );
-  const { quotes, asOf, status } = useQuotes(symbols, refreshToken, period);
+  // One refresh at once, so your row never mixes fresh and old prices.
+  const { quotes, asOf, status } = useQuotes(symbols, refreshToken, true);
+  const { display, status: periodStatus, lookback } = usePeriodQuotes(symbols, quotes, period, refreshToken);
+  const words = usePeriodWords(period);
 
   const rows = useMemo(() => {
     const list: Row[] = RANKED.map((board) => ({
       id: board.id,
       name: board.name,
       detail: `${board.title} · ${board.group === "Sector ETF" ? "Sector" : "Theme"}`,
-      pct: quotes[board.title]?.changePercent ?? null,
+      pct: display[board.title]?.changePercent ?? null,
       kind: "fund",
     }));
     if (book.positions.length) {
-      const change = periodChange(valueBook(book, quotes), quotes, period).total;
-      list.push({ id: "book", name: book.name, detail: "Your portfolio", pct: change.pct, kind: "portfolio" });
+      let pct: number | null = null;
+      let detail = "Your portfolio";
+      if (lookback) {
+        const move = periodStatus === "loading" ? null : holdingsLookback(book, display);
+        pct = move && move.covered === move.total ? move.percent : null;
+        detail = "Current-holdings lookback";
+      } else {
+        const analysis = analyzeBook(book, quotes).analysis;
+        pct = analysis.returnPercent;
+        if (!analysis.complete && Object.keys(quotes).length) detail = "Your portfolio · partial";
+      }
+      list.push({ id: "book", name: book.name, detail, pct, kind: "portfolio" });
     }
-    const market = quotes["^GSPC"]?.changePercent ?? null;
+    const market = display[BENCHMARK_SYMBOL]?.changePercent ?? null;
     if (market != null) list.push({ id: "spx", name: "S&P 500", detail: "Market", pct: market, kind: "market" });
     return list.sort((a, b) => (b.pct ?? -Infinity) - (a.pct ?? -Infinity));
-  }, [book, quotes, period]);
+  }, [book, quotes, display, lookback, periodStatus]);
 
-  const market = quotes["^GSPC"]?.changePercent ?? null;
+  const market = display[BENCHMARK_SYMBOL]?.changePercent ?? null;
   const beat = market == null ? null : rows.filter((r) => r.kind === "fund" && (r.pct ?? -Infinity) > market).length;
   let rank = 0;
 
@@ -80,7 +97,9 @@ export function SectorsView() {
         </div>
         <div className="mt-1 flex items-center justify-between gap-3 px-1 text-[13px] text-muted">
           <p className="min-w-0 truncate">
-            {beat != null ? `${beat} of ${RANKED.length} beat the market · ${PERIOD_WORDS[period]}` : `Ranked · ${PERIOD_WORDS[period]}`}
+            {beat != null
+              ? `${beat} of ${RANKED.length} beat the market · ${words}`
+              : `Ranked · ${lookback && periodStatus === "loading" ? `loading ${words}` : words}`}
           </p>
           <button
             type="button"
@@ -96,7 +115,7 @@ export function SectorsView() {
             label="Time frame"
             value={period}
             options={PERIOD_OPTIONS}
-            onChange={(t) => setView({ t: t === "1w" || t === "1m" ? t : "1d" })}
+            onChange={(t) => setView({ t })}
           />
         </div>
       </header>
@@ -128,7 +147,7 @@ export function SectorsView() {
                 onClick={() =>
                   mine ? setView({ tab: "portfolio" }) : setView({ tab: "map", board: row.id, sector: null })
                 }
-                className={`tile flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left ${heatClass(row.pct, period)} ${mine ? "ring-2 ring-accent ring-offset-2 ring-offset-bg" : ""}`}
+                className={`tile flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left ${heatClass(row.pct, HEAT_SCALE[period])} ${mine ? "ring-2 ring-accent ring-offset-2 ring-offset-bg" : ""}`}
               >
                 <span className="tabular w-5 text-right text-[13px] font-semibold opacity-70">{rank}</span>
                 <span className="min-w-0 flex-1">
@@ -151,7 +170,11 @@ export function SectorsView() {
           })}
         </div>
         <p className="px-4 pt-2 text-xs leading-relaxed text-muted">
-          Sectors are ranked by their fund (XLK for Technology, and so on). Your portfolio uses your holdings. Tap any row to open its map.
+          Sectors are ranked by their fund (XLK for Technology, and so on). Your portfolio uses your holdings
+          {lookback
+            ? "; for this window it is what your current positions did, not your account’s history"
+            : ""}
+          . Tap any row to open its map.
         </p>
       </div>
 

@@ -182,7 +182,7 @@ export function PositionSheet({
           )}
           {mode === "shares" ? (
             <ListGroup
-              footer={`${preview != null ? `Worth about ${formatMoney(preview)} at ${price ? "today's price" : "your cost"}. ` : ""}Average cost and purchase date are optional. With a date, any window that starts before it counts from your purchase price.`}
+              footer={`${preview != null ? `Worth about ${formatMoney(preview)} at ${price ? "today's price" : "your cost"}. ` : ""}Average cost and purchase date are optional. An average cost adds your gain since entry.`}
             >
               <Field id="shares" label="Shares" value={shares} onChange={setShares} placeholder="10" />
               <Field
