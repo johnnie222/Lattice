@@ -22,9 +22,10 @@ export function useView() {
   const search = useSearch({ from: "/" }) as LatticeSearch;
   const navigate = useNavigate({ from: "/" });
   const setView = useCallback(
-    (next: ViewPatch) => {
+    (next: ViewPatch, options?: { push?: boolean }) => {
       void navigate({
-        replace: true,
+        // Views replace each other; a jump between tabs can push, so Back returns.
+        replace: !options?.push,
         search: (prev: LatticeSearch) => {
           const merged = { ...prev, ...next };
           return {

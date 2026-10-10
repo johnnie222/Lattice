@@ -1,53 +1,20 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import { ChevronDown, Plus, Settings } from "lucide-react";
-import { GlassButton, LargeTitle, Segmented } from "@/components/chrome";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { ChevronDown, ChevronRight, Plus, Settings } from "lucide-react";
+import { GlassButton, LargeTitle } from "@/components/chrome";
 import { InfoSheet, ListGroup, ListRow, Sheet } from "@/components/sheets";
 import { SettingsSheet } from "@/components/settings-sheet";
 import { PositionSheet } from "@/components/position-sheet";
 import { Mark } from "@/components/mark";
-import { Heatmap } from "@/components/heatmap";
-import { CloseSheet, TodayCard, TodaySheet } from "@/components/today-close";
+import { DaySection } from "@/components/day-section";
 import { buildCloseFacts } from "@/lib/close-facts";
-import { formatAsOf, formatMoney, formatPct, formatShares, marketClock, type Session } from "@/lib/format";
-import { findListing, syntheticListing, type MapNode } from "@/lib/market";
+import { dayState, type DayState } from "@/lib/day-state";
+import { formatAsOf, formatMoney, formatPct, formatShares } from "@/lib/format";
+import { findListing, syntheticListing } from "@/lib/market";
 import { marketFacts, SECTOR_FUNDS } from "@/lib/market-facts";
-import { PERIOD_LABEL, type Period } from "@/lib/periods";
-import {
-  analyzeBook,
-  BENCHMARK_SYMBOL,
-  bookTileWeights,
-  holdingsLookback,
-  sinceEntryRows,
-  sizeBook,
-} from "@/lib/portfolio";
-import type { Quote } from "@/lib/quote-core";
-import { usePeriodQuotes, usePeriodWords } from "@/lib/use-period";
+import { analyzeBook, BENCHMARK_SYMBOL, bookTileWeights, sinceEntryRows, sizeBook } from "@/lib/portfolio";
 import { useQuotes } from "@/lib/use-quotes";
+import { useView } from "@/lib/use-view";
 import { activeBook, useBooks } from "@/store/books";
-
-type PortfolioPeriod = Period | "all";
-
-const OPTIONS: { id: PortfolioPeriod; label: string }[] = [
-  { id: "1d", label: "1D" },
-  { id: "1w", label: "1W" },
-  { id: "1m", label: "1M" },
-  { id: "ytd", label: "YTD" },
-  { id: "all", label: "All" },
-];
-
-type Layout = "map" | "list";
-const LAYOUTS: { id: Layout; label: string }[] = [
-  { id: "map", label: "Map" },
-  { id: "list", label: "List" },
-];
-
-const CLOSE_WHEN: Record<Session, string> = {
-  open: "Market open",
-  post: "After the close",
-  closed: "Market closed",
-  pre: "Before the open",
-  holiday: "Market holiday",
-};
 
 function tone(n: number | null | undefined): string {
   if (n == null) return "text-muted";
@@ -112,59 +79,39 @@ function PortfoliosSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
-/** "▲ $22.94 (0.21%)" or "▲ 1.20%": the summary card's change line. */
-function Arrow({ value, money, pct }: { value: number; money?: number | null; pct?: number | null }) {
-  return (
-    <>
-      {value >= 0 ? "▲" : "▼"}{" "}
-      {money != null
-        ? `${formatMoney(Math.abs(money))}${pct != null ? ` (${Math.abs(pct).toFixed(2)}%)` : ""}`
-        : `${Math.abs(pct ?? 0).toFixed(2)}%`}
-    </>
-  );
-}
-
-function Muted({ children }: { children: ReactNode }) {
-  return <span className="font-normal text-muted">{children}</span>;
-}
-
 /**
- * Your portfolio: value and today's move from the portfolio intelligence
- * engine, Today / Close, and each position as a map or list. Lookbacks show
- * what the positions held now did over the window; they are not the
- * account's past return, since Lattice doesn't know your trade history.
+ * Your portfolio as a dashboard: what it's worth (value, since entry), what
+ * happened today (the day section, the only place the day's P&L shows), and
+ * each position. The heatmap lives on the Map tab ("Show heatmap").
  */
 export function PortfolioView() {
+  const { setView } = useView();
   const books = useBooks((s) => s.books);
   const activeId = useBooks((s) => s.activeId);
   const book = activeBook({ books, activeId });
-  const [period, setPeriod] = useState<PortfolioPeriod>("1d");
-  const [layout, setLayout] = useState<Layout>("map");
   const setAnchors = useBooks((s) => s.setAnchors);
-  const [sheet, setSheet] = useState<"settings" | "info" | "portfolios" | "position" | "today" | "close" | null>(
-    null,
-  );
+  const [sheet, setSheet] = useState<"settings" | "info" | "portfolios" | "position" | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
-  const [clock, setClock] = useState<{ label: string; session: Session } | null>(null);
+  // Which session the day section describes, from the browser's clock only,
+  // so server and client renders agree.
+  const [day, setDay] = useState<DayState | null>(null);
 
   useEffect(() => {
-    const tick = () => setClock(marketClock());
+    const tick = () => setDay(dayState(new Date()));
     tick();
-    const timer = window.setInterval(tick, 10_000);
+    const timer = window.setInterval(tick, 30_000);
     return () => window.clearInterval(timer);
   }, []);
 
   const positionSymbols = useMemo(() => book.positions.map((p) => p.symbol), [book.positions]);
-  // The S&P 500 for "vs S&P 500", and the sector funds for Lattice Close's
-  // market context. One refresh is committed at once (waitForAll).
+  // The S&P 500 for "vs S&P 500", and the sector funds for the close's market
+  // context. One refresh is committed at once (waitForAll).
   const symbols = useMemo(
     () => [...new Set([...positionSymbols, BENCHMARK_SYMBOL, ...SECTOR_FUNDS.map((fund) => fund.symbol)])],
     [positionSymbols],
   );
   const live = useQuotes(positionSymbols.length ? symbols : [], refreshToken, true);
-  const span: Period = period === "all" ? "1d" : period;
-  const periodQuotes = usePeriodQuotes(positionSymbols, live.quotes, span, refreshToken);
 
   const sectors = useMemo(
     () => Object.fromEntries(positionSymbols.map((s) => [s, findListing(s)?.sector ?? "other"])),
@@ -172,14 +119,9 @@ export function PortfolioView() {
   );
   const result = useMemo(() => analyzeBook(book, live.quotes, sectors), [book, live.quotes, sectors]);
   const sizing = useMemo(() => sizeBook(book, (s) => live.quotes[s]?.price ?? null), [book, live.quotes]);
-  const tileWeights = useMemo(() => bookTileWeights(book, result, live.quotes), [book, result, live.quotes]);
-  const lookback = useMemo(
-    () =>
-      periodQuotes.lookback && periodQuotes.status !== "loading" ? holdingsLookback(book, periodQuotes.display) : null,
-    [book, periodQuotes],
-  );
+  const sizes = useMemo(() => bookTileWeights(book, result, live.quotes), [book, result, live.quotes]);
   const since = useMemo(() => sinceEntryRows(book, live.quotes), [book, live.quotes]);
-  const closeFacts = useMemo(
+  const facts = useMemo(
     () => buildCloseFacts(result.kind === "holdings" ? result.analysis : null, marketFacts(live.quotes)),
     [result, live.quotes],
   );
@@ -190,159 +132,33 @@ export function PortfolioView() {
     if (missing.length) setAnchors(Object.fromEntries(missing.map((p) => [p.symbol, live.quotes[p.symbol]!.price])));
   }, [book.positions, live.quotes, setAnchors]);
 
-  const spanWords = usePeriodWords(period === "all" ? "1d" : period);
-  const words = period === "all" ? "since entry" : spanWords;
   const holdings = result.kind === "holdings" ? result.analysis : null;
-  const weights = result.kind === "weights" ? result.analysis : null;
-  const lookbackComplete = lookback != null && lookback.percent != null && lookback.covered === lookback.total;
-
-  // The figure the change line (and, for percent portfolios, the big number) reports.
-  let figure: number | null = null;
-  let change: ReactNode;
-  if (period === "1d") {
-    if (holdings) {
-      if (holdings.dayChange == null) {
-        change = <Muted>{live.status === "error" ? "Prices unavailable" : "Loading…"}</Muted>;
-      } else if (holdings.complete) {
-        figure = holdings.returnPercent;
-        change = (
-          <>
-            <Arrow value={holdings.dayChange} money={holdings.dayChange} pct={holdings.returnPercent} />
-            <Muted> · {words}</Muted>
-          </>
-        );
-      } else {
-        change = (
-          <>
-            <Arrow value={holdings.dayChange} money={holdings.dayChange} />
-            <Muted>
-              {" "}
-              known · {holdings.coverage.priced} of {holdings.coverage.holdings} priced
-            </Muted>
-          </>
-        );
-      }
-    } else if (weights) {
-      if (weights.complete && weights.returnPercent != null) {
-        figure = weights.returnPercent;
-        change = (
-          <>
-            <Arrow value={weights.returnPercent} pct={weights.returnPercent} />
-            <Muted> · {words}</Muted>
-          </>
-        );
-      } else if (weights.knownContributionPercent != null) {
-        change = <Muted>Partial · {Math.round((weights.coverageRatio ?? 0) * 100)}% of portfolio priced</Muted>;
-      } else {
-        change = <Muted>{live.status === "error" ? "Prices unavailable" : "Loading…"}</Muted>;
-      }
-    }
-  } else if (period === "all") {
-    if (holdings?.sinceEntry) {
-      const s = holdings.sinceEntry;
-      figure = s.complete ? s.percent : null;
-      change = (
-        <>
-          <Arrow value={s.change} money={s.change} pct={s.percent} />
-          <Muted>
-            {" "}
-            · since entry
-            {s.complete ? "" : ` · ${s.holdings} of ${holdings.coverage.holdings} with a cost`}
-          </Muted>
-        </>
-      );
-    } else {
-      change = <Muted>{holdings ? "Add an average cost to see since entry" : "Since added · each position below"}</Muted>;
-    }
-  } else if (periodQuotes.status === "loading") {
-    change = <Muted>Loading {words}</Muted>;
-  } else if (lookbackComplete) {
-    figure = lookback!.percent;
-    change = (
-      <>
-        <Arrow value={lookback!.percent!} pct={lookback!.percent} />
-        <Muted> · current holdings, {words}</Muted>
-      </>
-    );
-  } else if (lookback == null) {
-    change = <Muted>Mixed portfolio · each position below</Muted>;
-  } else if (periodQuotes.status === "error" && lookback.covered === 0) {
-    change = <Muted>{PERIOD_LABEL[span]} unavailable</Muted>;
-  } else {
-    change = (
-      <Muted>
-        {lookback.covered} of {lookback.total} have a {PERIOD_LABEL[span]} close
-      </Muted>
-    );
-  }
-  const mood = figure == null ? "transparent" : figure >= 0 ? "var(--up-text)" : "var(--dn-text)";
-
-  const label = holdings
-    ? holdings.complete || holdings.coverage.priced === 0
-      ? "Total value"
-      : `Priced value · ${holdings.coverage.priced} of ${holdings.coverage.holdings}`
-    : "Percent-based portfolio";
-  const big = holdings
-    ? holdings.value != null
-      ? formatMoney(holdings.value)
-      : holdings.coverage.priced
-        ? formatMoney(holdings.pricedValue)
-        : "—"
-    : formatPct(figure);
-
-  // Each tile and row shows that position's own move for the chosen window.
-  const rowQuotes = useMemo(() => {
-    if (period !== "all") return period === "1d" ? live.quotes : periodQuotes.display;
-    const out: Record<string, Quote> = {};
-    for (const [symbol, row] of since) {
-      out[symbol] = {
-        symbol,
-        price: live.quotes[symbol]!.price,
-        previousClose: null,
-        change: row.change,
-        changePercent: row.percent,
-      };
-    }
-    return out;
-  }, [period, live.quotes, periodQuotes.display, since]);
-
-  const mapNodes = useMemo(
-    (): MapNode[] =>
-      book.positions
-        .filter((p) => (tileWeights.get(p.symbol) ?? 0) > 0)
-        .map((p) => {
-          const listing = findListing(p.symbol) ?? syntheticListing(p.symbol);
-          return {
-            symbol: p.symbol,
-            name: listing.name,
-            sector: listing.sector,
-            industry: listing.industry,
-            cap: listing.cap,
-            weight: tileWeights.get(p.symbol)!,
-          };
-        }),
-    [book.positions, tileWeights],
-  );
+  const today = holdings ? holdings.dayChange : result.analysis.returnPercent;
+  const mood = today == null ? "transparent" : today >= 0 ? "var(--up-text)" : "var(--dn-text)";
   const ordered = useMemo(
-    () => [...sizing.rows].sort((a, b) => (tileWeights.get(b.symbol) ?? 0) - (tileWeights.get(a.symbol) ?? 0)),
-    [sizing, tileWeights],
+    () => [...sizing.rows].sort((a, b) => (sizes.get(b.symbol) ?? 0) - (sizes.get(a.symbol) ?? 0)),
+    [sizing, sizes],
   );
+  const count = book.positions.length;
+  const asOf = live.asOf ? ` · ${formatAsOf(live.asOf)}` : live.status === "error" ? " · prices unavailable" : "";
 
-  const session = clock?.session ?? "closed";
-  // Wait for the browser's NYSE clock before offering the Close surface.
-  const closeMode = clock != null && session !== "open";
+  // Since entry is conservative: an aggregate only when every position has an
+  // average cost and a price. Otherwise say what's missing, or say nothing
+  // when no cost was ever entered.
+  const withCost = book.positions.filter((p) => p.kind === "shares" && p.entry != null).length;
+  const sinceEntry = holdings?.sinceEntry?.complete ? holdings.sinceEntry : null;
+  const sinceHint =
+    !holdings || sinceEntry || withCost === 0
+      ? null
+      : withCost < count
+        ? `Since entry: average cost on ${withCost} of ${count} positions`
+        : "Since entry: waiting for every position’s price";
 
   const openPosition = (symbol: string | null) => {
     setEditing(symbol);
     setSheet("position");
   };
-
-  const footer =
-    period === "1d"
-      ? "Each position’s move today, from its previous close."
-      : period === "all"
-        ? "From your average cost. Percent positions count from the price when you added them."
-        : `Each position’s own price move over the ${words.replace("past ", "")}, from its closing price at the start. This is not your account’s past return: Lattice doesn’t know when you bought or sold.`;
+  const showHeatmap = () => setView({ tab: "map", board: "book", sector: null, q: "" }, { push: true });
 
   return (
     <div className="ambient flex min-h-0 flex-1 flex-col" style={{ "--mood": mood } as CSSProperties}>
@@ -369,7 +185,7 @@ export function PortfolioView() {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3">
-        {book.positions.length === 0 ? (
+        {count === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
             <p className="text-lg font-semibold">No positions yet</p>
             <p className="max-w-xs text-sm leading-relaxed text-muted">
@@ -386,25 +202,58 @@ export function PortfolioView() {
           </div>
         ) : (
           <>
-            <section className="glass mb-3 rounded-3xl p-4">
+            <section className="glass mb-3 rounded-3xl p-4" data-testid="value-card">
               <button
                 type="button"
                 onClick={() => setRefreshToken((n) => n + 1)}
                 aria-label="Refresh prices"
                 className={`text-left text-[13px] ${live.status === "error" ? "text-down" : "text-muted"}`}
               >
-                {label}
-                {live.asOf ? ` · ${formatAsOf(live.asOf)}` : live.status === "error" ? " · prices unavailable" : ""}
+                {holdings
+                  ? holdings.complete || holdings.coverage.priced === 0
+                    ? "Total value"
+                    : `Priced value · ${holdings.coverage.priced} of ${holdings.coverage.holdings}`
+                  : "Percent-based portfolio"}
+                {asOf}
               </button>
-              <p className="tabular mt-0.5 text-[34px] font-semibold leading-tight tracking-tight">{big}</p>
-              <p className={`tabular mt-0.5 text-[15px] font-semibold ${tone(figure)}`} data-testid="portfolio-change">
-                {change}
-              </p>
-              <div className="mt-3">
-                <Segmented label="Time frame" value={period} options={OPTIONS} onChange={setPeriod} compact />
+              {holdings ? (
+                <p className="tabular mt-0.5 text-[34px] font-semibold leading-tight tracking-tight">
+                  {holdings.value != null
+                    ? formatMoney(holdings.value)
+                    : holdings.coverage.priced
+                      ? formatMoney(holdings.pricedValue)
+                      : "—"}
+                </p>
+              ) : (
+                <p className="mt-1 text-[15px] leading-snug text-muted">
+                  Positions are percentages, so figures are in % only.
+                </p>
+              )}
+              {sinceEntry ? (
+                <p className={`tabular mt-0.5 text-[15px] font-semibold ${tone(sinceEntry.change)}`} data-testid="since-entry">
+                  {sinceEntry.change >= 0 ? "▲" : "▼"} {formatMoney(Math.abs(sinceEntry.change))} (
+                  {Math.abs(sinceEntry.percent).toFixed(2)}%)<span className="font-normal text-muted"> · since entry</span>
+                </p>
+              ) : sinceHint ? (
+                <p className="mt-0.5 text-[13px] leading-snug text-muted" data-testid="since-entry">
+                  {sinceHint}
+                </p>
+              ) : null}
+              <div className="mt-2 flex items-center justify-between gap-3 text-[13px]">
+                <span className="text-muted">
+                  {count} {count === 1 ? "position" : "positions"}
+                </span>
+                <button
+                  type="button"
+                  onClick={showHeatmap}
+                  className="-my-2 flex h-9 items-center gap-0.5 font-semibold text-accent"
+                >
+                  Show heatmap
+                  <ChevronRight className="size-4" strokeWidth={2.5} />
+                </button>
               </div>
               {result.kind === "weights" && result.mixed ? (
-                <p className="mt-3 text-xs leading-relaxed text-muted">
+                <p className="mt-2 text-xs leading-relaxed text-muted">
                   This portfolio mixes shares and percentages, which older versions allowed. Percentages are read as a
                   share of the total{result.overflow ? ", but they add up to 100% or more" : ""}. For accurate
                   tracking, keep one kind per portfolio.
@@ -412,81 +261,56 @@ export function PortfolioView() {
               ) : null}
             </section>
 
-            <TodayCard result={result} close={closeMode} onOpen={() => setSheet(closeMode ? "close" : "today")} />
+            <DaySection result={result} facts={facts} day={day} />
 
-            <div className="mb-3 flex items-center justify-between px-1">
-              <h3 className="text-[13px] font-medium uppercase tracking-wide text-muted">
-                {book.positions.length} {book.positions.length === 1 ? "position" : "positions"}
-              </h3>
-              <Segmented label="Layout" value={layout} options={LAYOUTS} onChange={setLayout} />
-            </div>
-            {layout === "map" ? (
-              <div className="relative h-[max(320px,calc(100dvh-480px))]">
-                <Heatmap
-                  nodes={mapNodes}
-                  quotes={rowQuotes}
-                  period={period === "all" ? "ytd" : period}
-                  grouped={false}
-                  selected={null}
-                  onSelect={(symbol) => openPosition(symbol)}
-                  onDrill={() => undefined}
-                />
-              </div>
-            ) : (
-              <ListGroup footer={footer}>
-                {ordered.map((row) => {
-                  const p = row.position;
-                  const quote = rowQuotes[row.symbol];
-                  const priced = holdings?.positions.find((h) => h.symbol === row.symbol);
-                  const listing = findListing(row.symbol) ?? syntheticListing(row.symbol);
-                  const subtitle =
-                    p.kind === "shares"
-                      ? `${formatShares(p.shares)} ${p.shares === 1 ? "share" : "shares"}${p.entry != null ? ` · avg ${formatMoney(p.entry)}` : ""}`
-                      : `${p.percent}% at start · now ${(row.share * 100).toFixed(1)}%`;
-                  // Dollars only where they're facts: today's P&L, or the gain on your cost.
-                  const dollars =
-                    period === "1d"
-                      ? (priced?.dayChange ?? null)
-                      : period === "all"
-                        ? (since.get(row.symbol)?.change ?? null)
-                        : null;
-                  const pct = quote?.changePercent ?? null;
-                  return (
-                    <ListRow
-                      key={row.symbol}
-                      leading={<Mark symbol={row.symbol} size={36} />}
-                      title={
-                        <>
-                          <span className="font-semibold">{row.symbol}</span>
-                          {listing.name !== row.symbol ? <span className="text-muted"> · {listing.name}</span> : null}
-                        </>
-                      }
-                      subtitle={subtitle}
-                      detail={
-                        <span className="flex flex-col items-end">
-                          <span className="text-fg">
-                            {p.kind === "percent"
-                              ? `${(row.share * 100).toFixed(1)}%`
-                              : priced
-                                ? formatMoney(priced.value)
-                                : "No price"}
-                          </span>
-                          <span className={`text-xs font-semibold ${tone(pct)}`}>
-                            {pct != null
-                              ? `${dollars != null ? `${formatMoney(dollars, true)} · ` : ""}${formatPct(pct)}`
-                              : "—"}
-                          </span>
-                          {period === "all" && since.get(row.symbol)?.basis === "added" ? (
-                            <span className="text-[11px] text-muted">since added</span>
-                          ) : null}
+            <h3 className="mb-1.5 px-1 text-[13px] font-medium uppercase tracking-wide text-muted">
+              {count} {count === 1 ? "position" : "positions"}
+            </h3>
+            <ListGroup footer="Today’s move for each position, from its previous close. Tap one to edit it.">
+              {ordered.map((row) => {
+                const p = row.position;
+                const quote = live.quotes[row.symbol];
+                const priced = holdings?.positions.find((h) => h.symbol === row.symbol);
+                const listing = findListing(row.symbol) ?? syntheticListing(row.symbol);
+                const entry = since.get(row.symbol);
+                const subtitle =
+                  p.kind === "shares"
+                    ? `${formatShares(p.shares)} ${p.shares === 1 ? "share" : "shares"}${entry?.basis === "cost" ? ` · ${formatPct(entry.percent)} since entry` : ""}`
+                    : `${p.percent}% at start · now ${(row.share * 100).toFixed(1)}%`;
+                const pct = quote?.changePercent ?? null;
+                return (
+                  <ListRow
+                    key={row.symbol}
+                    leading={<Mark symbol={row.symbol} size={36} />}
+                    title={
+                      <>
+                        <span className="font-semibold">{row.symbol}</span>
+                        {listing.name !== row.symbol ? <span className="text-muted"> · {listing.name}</span> : null}
+                      </>
+                    }
+                    subtitle={subtitle}
+                    wrap
+                    detail={
+                      <span className="flex flex-col items-end">
+                        <span className="text-fg">
+                          {p.kind === "percent"
+                            ? `${(row.share * 100).toFixed(1)}%`
+                            : priced
+                              ? formatMoney(priced.value)
+                              : "No price"}
                         </span>
-                      }
-                      onClick={() => openPosition(row.symbol)}
-                    />
-                  );
-                })}
-              </ListGroup>
-            )}
+                        <span className={`text-xs font-semibold ${tone(pct)}`}>
+                          {pct != null
+                            ? `${priced ? `${formatMoney(priced.dayChange, true)} · ` : ""}${formatPct(pct)}`
+                            : "—"}
+                        </span>
+                      </span>
+                    }
+                    onClick={() => openPosition(row.symbol)}
+                  />
+                );
+              })}
+            </ListGroup>
           </>
         )}
       </div>
@@ -497,18 +321,6 @@ export function PortfolioView() {
           key={editing ?? "new"}
           symbol={editing}
           price={editing ? live.quotes[editing]?.price : undefined}
-          onClose={() => setSheet(null)}
-        />
-      ) : null}
-      {sheet === "today" || (sheet === "close" && !closeMode) ? (
-        <TodaySheet result={result} onClose={() => setSheet(null)} />
-      ) : null}
-      {sheet === "close" && closeMode ? (
-        <CloseSheet
-          facts={closeFacts}
-          when={`${CLOSE_WHEN[session]}${live.asOf ? ` · as of ${formatAsOf(live.asOf)}` : ""}`}
-          percentBook={result.kind === "weights"}
-          onToday={() => setSheet("today")}
           onClose={() => setSheet(null)}
         />
       ) : null}
