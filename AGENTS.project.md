@@ -149,3 +149,14 @@ Before production launch, require:
 - P0 product value: portfolio intelligence, My Portfolio Today, benchmark comparison, Lattice Close, historical periods
 
 AI news, Why Is It Moving, widgets, replay and cloud sync are **not** launch blockers.
+
+
+## Bug discipline
+
+Use `BUGS.md` for severity definitions and the bug ledger.
+
+- S0/S1 defects in an affected launch surface block that surface from shipping.
+- Wrong financial math is at least S1 when it can be shown to a user as correct.
+- Keep bugs separate from feature tickets, but link them both ways when a feature depends on a fix.
+- Add regression tests for financial-math bugs whenever practical.
+- Closed high-severity bugs remain archived for future agents to understand prior failure modes.
