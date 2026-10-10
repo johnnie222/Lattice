@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   appNameFromHost,
   createHeadInjector,
+  DEFAULT_APP_NAME,
   grokXCreatorHeadTags,
   injectGrokPwaHead,
   isDocumentPath,
@@ -20,6 +21,12 @@ import {
 import { renderInstallPage } from "./grok-pwa-plugin.mjs";
 
 const TEMPLATE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+// The injector falls back to the app's own share card (src/lib/og/site.json,
+// public/og.jpg) under the working directory. These tests describe the
+// injector itself, so they run from an empty app; files from the real
+// checkout are read through TEMPLATE_ROOT.
+process.chdir(mkdtempSync(join(tmpdir(), "grok-pwa-blank-app-")));
 
 test("injects before </head>", () => {
   const out = injectGrokPwaHead("<html><head><title>x</title></head><body></body></html>");
@@ -235,12 +242,12 @@ test("does not emit x:game:image without a public host or banner", () => {
   assert.doesNotMatch(noBanner, /x:game:image/);
 });
 
-test("site title Grok App is a real name, not a sentinel", () => {
+test("a site title equal to the default name is a real name, not a sentinel", () => {
   const out = injectGrokPwaHead("<html><head></head></html>", {
     host: "wild-race.grok.me",
-    site: { title: "Grok App" },
+    site: { title: DEFAULT_APP_NAME },
   });
-  assert.match(out, /property="og:title" content="Grok App"/);
+  assert.match(out, new RegExp(`property="og:title" content="${DEFAULT_APP_NAME}"`));
 });
 
 test("published grok.me slug is still a title fallback", () => {
@@ -484,14 +491,14 @@ test("strips install params from the app link", () => {
 });
 
 test("names the install page from host slug", () => {
-  assert.equal(appNameFromHost("localhost:8080"), "Grok App");
-  assert.equal(appNameFromHost("172.17.154.217:8080"), "Grok App");
+  assert.equal(appNameFromHost("localhost:8080"), DEFAULT_APP_NAME);
+  assert.equal(appNameFromHost("172.17.154.217:8080"), DEFAULT_APP_NAME);
   assert.equal(appNameFromHost("wild-race.grok.me"), "Wild Race");
 });
 
 test("rejects hosts that are not plain slugs", () => {
-  assert.equal(appNameFromHost("<script>alert(1)</script>"), "Grok App");
-  assert.equal(appNameFromHost('"><img src=x onerror=1>.grok.me'), "Grok App");
+  assert.equal(appNameFromHost("<script>alert(1)</script>"), DEFAULT_APP_NAME);
+  assert.equal(appNameFromHost('"><img src=x onerror=1>.grok.me'), DEFAULT_APP_NAME);
 });
 
 test("renders install page markup", () => {
@@ -512,7 +519,9 @@ test("renders the manifest with the per-app name", () => {
   const manifest = JSON.parse(renderWebManifest("wild-race.grok.me"));
   assert.equal(manifest.name, "Wild Race");
   assert.equal(manifest.short_name, "Wild Race");
-  assert.equal(manifest.icons[0].src, "/__grok/icon-180.png");
+  // The LATTICE mark (scalable), not the template's Grok icon.
+  assert.equal(manifest.icons[0].src, "/favicon.svg");
+  assert.equal(manifest.icons[0].type, "image/svg+xml");
 });
 
 // Tripwires: the deployed-app path only works if Nitro scans server/ — an
