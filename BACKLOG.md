@@ -20,6 +20,7 @@ Statuses:
 | 6 | #6 | Play subscriptions + entitlement | Critical | Medium | Store fee | No ads; useful free tier |
 | 7 | #7 | Product analytics / launch funnel | High | Low-Med | Low | Needed to reprioritize from evidence |
 | 8 | #8 | Google Play production hardening | Critical | Medium | Low | Policy/store/release readiness |
+| 9 | #undefined | First-run guided onboarding + separate portfolio tour | High | Low-Med | None | Implement late, after core UX stabilizes |
 
 ### P0 release slice
 
@@ -34,38 +35,39 @@ A public paid launch does **not** need the full backlog. The target launch produ
 - 1D / 1W / 1M / YTD
 - licensed/commercial quote path
 - subscriptions + analytics + Play compliance
+- first-run guided onboarding, with portfolio onboarding kept as a separate contextual flow
 
 ## P1 — NEXT: retention and organic distribution
 
 | Rank | Issue | Feature | Value | Effort | New recurring cost | Notes |
 |---:|---:|---|---|---|---|---|
-| 9 | #9 | Portfolio Pulse + Market Changed | Very high | Medium | Low | “Did anything happen since I checked?” |
-| 10 | #10 | Opening Bell + meaningful alerts | Very high | Medium | Push infra | Morning/intraday habit |
-| 11 | #11 | Shareable market/portfolio cards | High | Low-Med | None | Product-led distribution |
-| 12 | #12 | Tomorrow / earnings & events | High | Medium | Event feed | “What matters next?” |
-| 13 | — | Market breadth/regime label | High | Low | None | Broad rally / narrow rally / mixed |
-| 14 | — | Watchlist heatmap | High | Low-Med | Minimal | Habit without requiring ownership |
-| 15 | — | Personal records / factual streaks | Medium | Low | Storage | Best day, beat-market streak, breadth records |
+| 10 | #9 | Portfolio Pulse + Market Changed | Very high | Medium | Low | “Did anything happen since I checked?” |
+| 11 | #10 | Opening Bell + meaningful alerts | Very high | Medium | Push infra | Morning/intraday habit |
+| 12 | #11 | Shareable market/portfolio cards | High | Low-Med | None | Product-led distribution |
+| 13 | #12 | Tomorrow / earnings & events | High | Medium | Event feed | “What matters next?” |
+| 14 | — | Market breadth/regime label | High | Low | None | Broad rally / narrow rally / mixed |
+| 15 | — | Watchlist heatmap | High | Low-Med | Minimal | Habit without requiring ownership |
+| 16 | — | Personal records / factual streaks | Medium | Low | Storage | Best day, beat-market streak, breadth records |
 
 ## P2 — LATER: intelligence
 
 | Rank | Issue | Feature | Value | Effort | New recurring cost | Notes |
 |---:|---:|---|---|---|---|---|
-| 16 | #13 | AI Daily Brief | Very high | Medium | Low AI cost | Narrative over deterministic facts |
-| 17 | #14 | Portfolio news matching | Very high | Med-High | News license | Relevant news only |
-| 18 | #14 | Why Is It Moving | Very high | High | Potentially high | Ship only after licensing economics are known |
-| 19 | — | Home-screen widget | High | Medium | Minimal | Strong passive retention |
-| 20 | — | Cloud portfolio sync | Medium | Medium | Backend/auth | Only when multi-device demand justifies accounts |
+| 17 | #13 | AI Daily Brief | Very high | Medium | Low AI cost | Narrative over deterministic facts |
+| 18 | #14 | Portfolio news matching | Very high | Med-High | News license | Relevant news only |
+| 19 | #14 | Why Is It Moving | Very high | High | Potentially high | Ship only after licensing economics are known |
+| 20 | — | Home-screen widget | High | Medium | Minimal | Strong passive retention |
+| 21 | — | Cloud portfolio sync | Medium | Medium | Backend/auth | Only when multi-device demand justifies accounts |
 
 ## P3 — EXPERIMENTS / expansion
 
 | Rank | Feature | Value | Effort/cost | Rule |
 |---:|---|---|---|---|
-| 21 | Heatmap Replay | High/differentiated | High | Prototype only after history is solid |
-| 22 | More international markets | Medium | High licensing/QA | Demand-led |
-| 23 | Crypto heatmaps | Medium | Medium | Demand-led |
-| 24 | Dividend heatmaps | Medium | Medium | Demand-led |
-| 25 | Futures/commodities | Medium | High data complexity | Demand-led |
+| 22 | Heatmap Replay | High/differentiated | High | Prototype only after history is solid |
+| 23 | More international markets | Medium | High licensing/QA | Demand-led |
+| 24 | Crypto heatmaps | Medium | Medium | Demand-led |
+| 25 | Dividend heatmaps | Medium | Medium | Demand-led |
+| 26 | Futures/commodities | Medium | High data complexity | Demand-led |
 
 ## AVOID for now
 
