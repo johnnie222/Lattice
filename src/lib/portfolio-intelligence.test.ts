@@ -158,6 +158,30 @@ describe("analyzePortfolio", () => {
     close(result.positions[1]!.dollarContribution, -40);
   });
 
+  it("sizes dollar contribution by the whole book when some quotes are missing", () => {
+    // $10k book: AAA is $5k, CCC is $2k, BBB ($3k) has no quote yet.
+    const result = analyzePortfolio({
+      lines: [
+        { symbol: "AAA", weight: 50 },
+        { symbol: "BBB", weight: 30 },
+        { symbol: "CCC", weight: 20 },
+      ],
+      quotes: {
+        AAA: { changePercent: 2 },
+        CCC: { changePercent: -1 },
+      },
+      sectorBySymbol: { AAA: "tech", CCC: "energy" },
+      notional: 10_000,
+    });
+
+    close(result.returnPercent, (50 / 70) * 2 + (20 / 70) * -1);
+    close(result.positions[0]!.dollarContribution, 100);
+    close(result.positions[1]!.dollarContribution, -20);
+    close(result.dollarChange, 80);
+    close(result.sectors.find((row) => row.sector === "tech")!.dollarContribution, 100);
+    close(result.sectors.find((row) => row.sector === "energy")!.dollarContribution, -20);
+  });
+
   it("returns a safe empty analysis when no positive-weight positions have valid quotes", () => {
     const result = analyzePortfolio({
       lines: [

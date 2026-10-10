@@ -89,6 +89,12 @@ function moneyFromPercent(notional: number | null, percent: number): number | nu
  *
  * Contribution values are percentage-point contributions to portfolio return.
  * Their sum equals returnPercent (apart from floating-point rounding).
+ *
+ * Dollar values are different: notional is the whole book, so each holding's
+ * dollars come from its share of the whole book (rawWeight / totalWeight),
+ * not its share of the quoted part. With partial coverage, dollarChange is
+ * the move of the quoted holdings only; unquoted holdings add nothing rather
+ * than being assumed to move like the rest.
  */
 export function analyzePortfolio({
   lines,
@@ -129,7 +135,10 @@ export function analyzePortfolio({
             normalizedWeight,
             changePercent: line.changePercent,
             contributionPercent,
-            dollarContribution: moneyFromPercent(usableNotional, contributionPercent),
+            dollarContribution: moneyFromPercent(
+              usableNotional,
+              (line.weight / totalWeight) * line.changePercent,
+            ),
             sector: sectorBySymbol[line.symbol] ?? "other",
           };
         })
@@ -176,32 +185,40 @@ export function analyzePortfolio({
 
   const sectorMap = new Map<
     PortfolioSector,
-    { normalizedWeight: number; contributionPercent: number; positions: number }
+    {
+      normalizedWeight: number;
+      contributionPercent: number;
+      dollarContribution: number | null;
+      positions: number;
+    }
   >();
 
   for (const position of positions) {
     const current = sectorMap.get(position.sector) ?? {
       normalizedWeight: 0,
       contributionPercent: 0,
+      dollarContribution: usableNotional == null ? null : 0,
       positions: 0,
     };
     current.normalizedWeight += position.normalizedWeight;
     current.contributionPercent += position.contributionPercent;
+    if (current.dollarContribution != null && position.dollarContribution != null) {
+      current.dollarContribution += position.dollarContribution;
+    }
     current.positions += 1;
     sectorMap.set(position.sector, current);
   }
 
   const sectors: PortfolioSectorAnalysis[] = [...sectorMap.entries()]
-    .map(([sector, values]) => ({
-      sector,
-      ...values,
-      dollarContribution: moneyFromPercent(usableNotional, values.contributionPercent),
-    }))
+    .map(([sector, values]) => ({ sector, ...values }))
     .sort((a, b) => b.contributionPercent - a.contributionPercent);
 
   return {
     returnPercent,
-    dollarChange: returnPercent == null ? null : moneyFromPercent(usableNotional, returnPercent),
+    dollarChange:
+      returnPercent == null || usableNotional == null
+        ? null
+        : positions.reduce((sum, position) => sum + (position.dollarContribution ?? 0), 0),
     benchmarkReturnPercent: validBenchmark,
     relativeReturnPercent,
     totalWeight,
