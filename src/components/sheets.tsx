@@ -10,10 +10,11 @@ import {
   type MapNode,
 } from "@/lib/market";
 import type { Quote } from "@/lib/quote-core";
+import { UNIVERSE_GROUPS } from "@/lib/universes";
 import type { Book } from "@/store/books";
 import { Mark } from "@/components/mark";
 
-export type SheetId = "boards" | "filter" | "info" | "position" | "stock" | "settings";
+export type SheetId = "boards" | "controls" | "info" | "position" | "stock" | "settings";
 
 export function Sheet({
   title,
@@ -118,18 +119,36 @@ const FILTERS: { id: FilterId; label: string; hint: string }[] = [
   { id: "m2", label: "Move ≥ 2%", hint: "The loud ones" },
 ];
 
-export function FilterSheet({
+/**
+ * Map controls: what's shown (filter) and how fresh it is, plus the way to
+ * the guide and Settings. Choosing a universe stays on the title.
+ */
+export function ControlsSheet({
   filter,
-  onChange,
+  onFilter,
+  status,
+  updated,
+  delayed,
+  onRefresh,
+  onInfo,
+  onSettings,
   onClose,
 }: {
   filter: FilterId;
-  onChange: (filter: FilterId) => void;
+  onFilter: (filter: FilterId) => void;
+  /** e.g. "Market Open" */
+  status: string;
+  /** e.g. "11:00", "Delayed 10:52", "Unavailable" */
+  updated: string;
+  delayed: boolean;
+  onRefresh: () => void;
+  onInfo: () => void;
+  onSettings: () => void;
   onClose: () => void;
 }) {
   return (
-    <Sheet title="Filter" onClose={onClose}>
-      <ListGroup>
+    <Sheet title="Map Controls" onClose={onClose}>
+      <ListGroup title="Filter">
         {FILTERS.map((item) => (
           <ListRow
             key={item.id}
@@ -137,11 +156,29 @@ export function FilterSheet({
             subtitle={item.hint}
             checked={item.id === filter}
             onClick={() => {
-              onChange(item.id);
+              onFilter(item.id);
               onClose();
             }}
           />
         ))}
+      </ListGroup>
+      <ListGroup
+        title="Data"
+        footer="Prices come from Yahoo Finance's public feed. It isn't an official exchange feed and may be delayed."
+      >
+        <ListRow title="Market" detail={status} />
+        <ListRow title="Last update" detail={<span className={delayed ? "text-down" : undefined}>{updated}</span>} />
+        <ListRow
+          title={<span className="text-accent">Refresh Now</span>}
+          onClick={() => {
+            onRefresh();
+            onClose();
+          }}
+        />
+      </ListGroup>
+      <ListGroup>
+        <ListRow title="How to read the map" chevron onClick={onInfo} />
+        <ListRow title="Settings" chevron onClick={onSettings} />
       </ListGroup>
     </Sheet>
   );
@@ -201,7 +238,6 @@ export function BoardSheet({
     for (const board of BOARDS) map.set(board.id, boardNodes(board).length);
     return map;
   }, []);
-  const groups = ["Index", "Sector ETF", "Thematic"] as const;
 
   return (
     <Sheet title="Markets" onClose={onClose}>
@@ -215,7 +251,7 @@ export function BoardSheet({
           onClick={onBook}
         />
       </ListGroup>
-      {groups.map((group) => (
+      {UNIVERSE_GROUPS.map((group) => (
         <ListGroup key={group} title={group === "Sector ETF" ? "Sector funds" : group === "Index" ? "Indexes" : "Themes"}>
           {BOARDS.filter((board) => board.group === group).map((board) => (
             <ListRow
@@ -233,7 +269,7 @@ export function BoardSheet({
           ))}
         </ListGroup>
       ))}
-      <ListGroup>
+      <ListGroup footer="Tip: press and hold the title to switch quickly.">
         <ListRow title="How to read the map" chevron onClick={onInfo} />
       </ListGroup>
     </Sheet>

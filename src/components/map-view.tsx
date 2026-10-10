@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ChevronDown, ChevronLeft, ListFilter, Search, Settings } from "lucide-react";
+import { ChevronLeft, Search, SlidersHorizontal } from "lucide-react";
 import { BOARDS, sectorLabel, type SectorId } from "@/data/universe";
 import { Heatmap } from "@/components/heatmap";
-import { BoardSheet, FilterSheet, InfoSheet, StockSheet, type SheetId } from "@/components/sheets";
+import { BoardSheet, ControlsSheet, InfoSheet, StockSheet, type SheetId } from "@/components/sheets";
 import { GlassButton, LargeTitle, Segmented } from "@/components/chrome";
 import { PositionSheet } from "@/components/position-sheet";
+import { UniverseTitle } from "@/components/quick-wheel";
+import { noteMenuSwitch } from "@/lib/quick-wheel-hint";
 import { SettingsSheet } from "@/components/settings-sheet";
 import { formatAsOf, formatLevel, formatPct, marketClock, type Session } from "@/lib/format";
 import {
@@ -22,9 +24,10 @@ import {
   type MapNode,
 } from "@/lib/market";
 import { useQuotes } from "@/lib/use-quotes";
-import { periodMove, type Period } from "@/lib/periods";
+import { PERIOD_LABEL, periodMove, type Period } from "@/lib/periods";
 import { analyzeBook, bookSymbols, bookTileWeights, holdingsLookback } from "@/lib/portfolio";
 import { PERIOD_OPTIONS, usePeriodQuotes, usePeriodWords } from "@/lib/use-period";
+import { universes } from "@/lib/universes";
 import { DEFAULT_BOARD, useView } from "@/lib/use-view";
 import { activeBook, useBooks } from "@/store/books";
 
@@ -39,6 +42,15 @@ const SESSION_TEXT: Record<Session, string> = {
   post: "After Hours",
   closed: "Market Closed",
   holiday: "Market Holiday",
+};
+
+// Compact form for the header's status line.
+const SESSION_SHORT: Record<Session, string> = {
+  open: "Open",
+  pre: "Pre-market",
+  post: "After hours",
+  closed: "Closed",
+  holiday: "Holiday",
 };
 
 // Past this, quotes on screen are called out as delayed.
@@ -65,6 +77,7 @@ export function MapView() {
   const [sheet, setSheet] = useState<SheetId | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
+  const [wheelHint, setWheelHint] = useState(false);
   const [clock, setClock] = useState<{ label: string; session: Session } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -72,6 +85,7 @@ export function MapView() {
   const activeId = useBooks((s) => s.activeId);
   const book = activeBook({ books, activeId });
   const board = boardById(boardId);
+  const wheelItems = useMemo(() => universes(book.name), [book.name]);
   const bookMode = boardId === "book";
 
   const rawNodes = useMemo(() => {
@@ -223,37 +237,57 @@ export function MapView() {
   const headPct = benchQuote ? benchQuote.changePercent : move;
   const headUp = (headPct ?? 0) >= 0;
   const words = usePeriodWords(period);
-  const baseCaption = bookMode
-    ? lookback
-      ? "Current holdings"
-      : "Your portfolio"
-    : drill
-      ? `${board.title} · ${sectorLabel(drill)}`
-      : benchQuote
-        ? board.group === "Index"
-          ? "Index"
-          : `${board.title} fund`
-        : "Weighted move";
-  const coverage = bookMode
-    ? lookback
-      ? bookLookback && bookLookback.covered < bookLookback.total
-        ? ` · ${bookLookback.covered} of ${bookLookback.total} with a close`
-        : ""
-      : bookResult && !bookResult.analysis.complete && symbols.length
-        ? holdings
-          ? ` · ${holdings.coverage.priced} of ${holdings.coverage.holdings} priced`
-          : " · partial"
-        : ""
-    : !benchQuote && marketPartial && lookbackMove
-      ? ` · ${lookbackMove.covered} of ${lookbackMove.total} priced`
-      : "";
-  const caption = `${baseCaption} · ${lookback && periodStatus === "loading" ? `loading ${words}` : lookback && periodStatus === "error" && headPct == null ? `${words} unavailable` : words}${coverage}`;
+  const label = PERIOD_LABEL[period];
+  // One fixed slot next to the big number: the move when it's known, or a
+  // muted qualifier (loading, coverage, unavailable) when it isn't, so the
+  // header never grows or shrinks and the map never jumps.
+  let pill: { text: string; up: boolean | null } | null = null;
+  if (benchQuote) {
+    if (benchQuote.changePercent != null) {
+      pill = { text: `${benchQuote.changePercent >= 0 ? "▲" : "▼"} ${Math.abs(benchQuote.changePercent).toFixed(2)}%`, up: headUp };
+    } else if (lookback) {
+      pill = { text: periodStatus === "loading" ? `Loading ${label}` : `${label} unavailable`, up: null };
+    }
+  } else if (bookMode && bookResult) {
+    if (lookback) {
+      pill =
+        periodStatus === "loading"
+          ? { text: `Loading ${label}`, up: null }
+          : bookLookback && bookLookback.covered === bookLookback.total
+            ? { text: "Current holdings", up: null }
+            : bookLookback && bookLookback.covered > 0
+              ? { text: `${bookLookback.covered} of ${bookLookback.total} with a close`, up: null }
+              : { text: `${label} unavailable`, up: null };
+    } else if (holdings) {
+      if (pnl != null) {
+        pill = {
+          text: holdings.complete
+            ? formatDollars(pnl)
+            : `${formatDollars(pnl)} known · ${holdings.coverage.priced} of ${holdings.coverage.holdings}`,
+          up: pnl >= 0,
+        };
+      }
+    } else if (bookResult.kind === "weights") {
+      const a = bookResult.analysis;
+      if (!a.complete && a.coverageRatio != null && quoted.length)
+        pill = { text: `${Math.round(a.coverageRatio * 100)}% priced`, up: null };
+    }
+  } else if (lookback) {
+    pill =
+      periodStatus === "loading"
+        ? { text: `Loading ${label}`, up: null }
+        : marketPartial && lookbackMove
+          ? { text: `partial · ${lookbackMove.covered} of ${lookbackMove.total}`, up: null }
+          : headPct == null
+            ? { text: `${label} unavailable`, up: null }
+            : null;
+  }
   const updated = asOfLabel
     ? stale
       ? `Delayed ${asOfLabel}`
       : asOfLabel
     : status === "error"
-      ? "Prices unavailable"
+      ? "Unavailable"
       : "Updating…";
   const flats = quoted.length - ups - downs;
   const mood = headPct == null ? "transparent" : headUp ? "var(--up-text)" : "var(--dn-text)";
@@ -263,7 +297,7 @@ export function MapView() {
       className="ambient flex min-h-0 flex-1 flex-col"
       style={{ "--mood": mood } as CSSProperties}
     >
-      <header className="safe-t shrink-0 px-3 pb-2">
+      <header className="safe-t relative shrink-0 px-3 pb-2">
         <div className="flex h-12 items-center gap-2">
           {drill ? (
             <GlassButton label="Back to full map" onClick={() => setDrill(null)}>
@@ -274,73 +308,61 @@ export function MapView() {
             {drill ? (
               <LargeTitle>{title}</LargeTitle>
             ) : (
-              <button
-                type="button"
-                onClick={() => setSheet("boards")}
-                className="flex w-full min-w-0 items-center gap-1 text-left"
-              >
-                <LargeTitle>{title}</LargeTitle>
-                <ChevronDown className="mt-1 size-5 shrink-0 text-muted" strokeWidth={2.5} />
-              </button>
+              <UniverseTitle
+                title={title}
+                current={boardId}
+                items={wheelItems}
+                hint={wheelHint}
+                onTap={() => setSheet("boards")}
+                onSwitch={(id) => setView({ board: id, sector: null })}
+              />
             )}
           </div>
           <GlassButton label="Search" pressed={searchOpen} onClick={() => setSearchOpen((open) => !open)}>
             <Search className="size-[18px]" strokeWidth={2.25} />
           </GlassButton>
-          <GlassButton label="Filter" dot={filter !== "all"} onClick={() => setSheet("filter")}>
-            <ListFilter className="size-[18px]" strokeWidth={2.25} />
-          </GlassButton>
-          <GlassButton label="Settings" onClick={() => setSheet("settings")}>
-            <Settings className="size-[19px]" strokeWidth={2.1} />
+          <GlassButton
+            label={filter !== "all" ? "Map controls, filter on" : "Map controls"}
+            dot={filter !== "all"}
+            onClick={() => setSheet("controls")}
+          >
+            <SlidersHorizontal className="size-[18px]" strokeWidth={2.25} />
           </GlassButton>
         </div>
 
-        <div className="mt-1 px-1">
-          <div className="flex items-center justify-between gap-3 text-[13px] text-muted">
-            <p className="min-w-0 truncate">
-              {caption}
-              {bookMode ? (
-                <>
-                  {" · "}
-                  <button type="button" className="font-semibold text-accent" onClick={() => setView({ tab: "portfolio" })}>
-                    Edit
-                  </button>
-                </>
-              ) : null}
-            </p>
-            <button
-              type="button"
-              onClick={() => setRefreshToken((n) => n + 1)}
-              aria-label={`${SESSION_TEXT[session]}. ${updated}. Refresh prices`}
-              className="flex shrink-0 items-center gap-1.5"
+        <div className="mt-0.5 flex items-center gap-2 px-1" data-testid="map-headline">
+          <span className="tabular shrink-0 text-[26px] font-semibold leading-tight tracking-tight">
+            {benchQuote ? formatLevel(benchQuote.price) : headPct != null ? formatPct(headPct) : "—"}
+          </span>
+          {pill ? (
+            <span
+              className={`tabular min-w-0 truncate rounded-full px-2 py-0.5 text-[12px] font-semibold ${pill.up == null ? "text-muted" : pill.up ? "text-up" : "text-down"}`}
+              style={{
+                background:
+                  pill.up == null
+                    ? "color-mix(in srgb, var(--muted) 14%, transparent)"
+                    : `color-mix(in srgb, ${pill.up ? "var(--up-text)" : "var(--dn-text)"} 16%, transparent)`,
+              }}
+              data-testid="map-pill"
             >
-              <span className={`size-1.5 rounded-full ${session === "open" ? "bg-up" : "bg-muted"}`} />
-              <span>{SESSION_TEXT[session]}</span>
-              <span className={stale || status === "error" ? "text-down" : undefined}>· {updated}</span>
-            </button>
-          </div>
-          <div className="mt-0.5 flex items-center gap-2.5">
-            <span className="tabular text-[34px] font-semibold leading-tight tracking-tight">
-              {benchQuote ? formatLevel(benchQuote.price) : headPct != null ? formatPct(headPct) : "—"}
+              {pill.text}
             </span>
-            {(benchQuote && benchQuote.change != null && benchQuote.changePercent != null) || pnl != null ? (
-              <span
-                className={`tabular shrink-0 rounded-full px-2.5 py-1 text-[13px] font-semibold ${(benchQuote ? headUp : (pnl ?? 0) >= 0) ? "text-up" : "text-down"}`}
-                style={{
-                  background: `color-mix(in srgb, ${(benchQuote ? headUp : (pnl ?? 0) >= 0) ? "var(--up-text)" : "var(--dn-text)"} 16%, transparent)`,
-                }}
-              >
-                {benchQuote && benchQuote.change != null && benchQuote.changePercent != null
-                  ? `${benchQuote.change >= 0 ? "▲" : "▼"} ${Math.abs(benchQuote.change).toFixed(2)} (${Math.abs(benchQuote.changePercent).toFixed(2)}%)`
-                  : `${formatDollars(pnl ?? 0)}${holdings && !holdings.complete ? " known" : ""}`}
-              </span>
-            ) : null}
-          </div>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setRefreshToken((n) => n + 1)}
+            aria-label={`${SESSION_TEXT[session]}. ${updated}. Refresh prices`}
+            className="ml-auto flex shrink-0 items-center gap-1.5 text-[12px] text-muted"
+          >
+            <span className={`size-1.5 rounded-full ${session === "open" ? "bg-up" : "bg-muted"}`} />
+            <span>{SESSION_SHORT[session]}</span>
+            <span className={stale || status === "error" ? "text-down" : undefined}>· {updated}</span>
+          </button>
         </div>
 
-        <div className="mt-2.5 flex items-center gap-3 px-1">
+        <div className="mt-1.5 flex items-center gap-3 px-1">
           <div className="shrink-0">
-            <Segmented label="Time frame" value={period} options={PERIOD_OPTIONS} onChange={setPeriod} />
+            <Segmented label="Time frame" value={period} options={PERIOD_OPTIONS} onChange={setPeriod} size="sm" />
           </div>
           {quoted.length ? (
             <div className="min-w-0 flex-1" aria-label={`${ups} up, ${downs} down`}>
@@ -349,7 +371,7 @@ export function MapView() {
                 <span className="bg-line" style={{ width: `${(flats / quoted.length) * 100}%` }} />
                 <span className="bg-down" style={{ width: `${(downs / quoted.length) * 100}%` }} />
               </div>
-              <div className="tabular mt-1 flex justify-between text-[11px] font-medium text-muted">
+              <div className="tabular mt-0.5 flex justify-between text-[11px] font-medium text-muted">
                 <span>{ups} up</span>
                 <span>{downs} down</span>
               </div>
@@ -436,6 +458,7 @@ export function MapView() {
           onPick={(id) => {
             setView({ board: id, sector: null });
             setSheet(null);
+            if (id !== boardId && noteMenuSwitch()) setWheelHint(true);
           }}
           onBook={() => {
             setSheet(null);
@@ -445,8 +468,18 @@ export function MapView() {
           onClose={() => setSheet(null)}
         />
       ) : null}
-      {sheet === "filter" ? (
-        <FilterSheet filter={filter} onChange={setFilter} onClose={() => setSheet(null)} />
+      {sheet === "controls" ? (
+        <ControlsSheet
+          filter={filter}
+          onFilter={setFilter}
+          status={SESSION_TEXT[session]}
+          updated={updated}
+          delayed={stale || status === "error"}
+          onRefresh={() => setRefreshToken((n) => n + 1)}
+          onInfo={() => setSheet("info")}
+          onSettings={() => setSheet("settings")}
+          onClose={() => setSheet(null)}
+        />
       ) : null}
       {sheet === "info" ? <InfoSheet onClose={() => setSheet(null)} /> : null}
       {sheet === "settings" ? (

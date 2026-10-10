@@ -55,15 +55,23 @@ export function Segmented<T extends string>({
   options,
   onChange,
   compact,
+  size = "md",
 }: {
   label: string;
   value: T;
   options: { id: T; label: string }[];
   onChange: (id: T) => void;
   compact?: boolean;
+  /** "sm" for dense headers (the map). */
+  size?: "md" | "sm";
 }) {
+  const sm = size === "sm";
   return (
-    <div role="radiogroup" aria-label={label} className={`glass rounded-full p-1 ${compact ? "flex" : "inline-flex"}`}>
+    <div
+      role="radiogroup"
+      aria-label={label}
+      className={`glass rounded-full ${sm ? "p-0.5" : "p-1"} ${compact ? "flex" : "inline-flex"}`}
+    >
       {options.map((option) => {
         const on = option.id === value;
         return (
@@ -73,7 +81,7 @@ export function Segmented<T extends string>({
             role="radio"
             aria-checked={on}
             onClick={() => onChange(option.id)}
-            className={`h-7 rounded-full font-semibold transition-colors ${compact ? "min-w-0 flex-1 px-1 text-[12px]" : "w-11 text-[13px]"} ${on ? "bg-[var(--seg-thumb)] text-fg shadow-[0_1px_4px_rgb(0_0_0/0.25)]" : "text-muted"}`}
+            className={`rounded-full font-semibold transition-colors ${sm ? "h-6" : "h-7"} ${compact ? "min-w-0 flex-1 px-1 text-[12px]" : sm ? "w-9 text-[12px]" : "w-11 text-[13px]"} ${on ? "bg-[var(--seg-thumb)] text-fg shadow-[0_1px_4px_rgb(0_0_0/0.25)]" : "text-muted"}`}
           >
             {option.label}
           </button>
