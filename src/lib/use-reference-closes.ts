@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchReferenceCloses } from "@/lib/history";
+import { loadReferenceCloses } from "@/lib/history-source";
 import { isLookback, referenceDate, type Period, type ReferenceClose } from "@/lib/periods";
 
 // Reference closes don't move during a session, so they're cached per
@@ -75,9 +75,7 @@ export function useReferenceCloses(
       for (const batch of batches) {
         if (cancel || !batch.length) continue;
         try {
-          const res: Awaited<ReturnType<typeof fetchReferenceCloses>> = await fetchReferenceCloses({
-            data: { symbols: batch, period, anchor },
-          });
+          const res = await loadReferenceCloses({ symbols: batch, period, anchor });
           if (cancel) return;
           // The server may have corrected the anchor; only keep matching answers.
           if (res.anchor !== anchor || res.period !== period) {

@@ -85,19 +85,19 @@ export function formatAsOf(at: number, now = Date.now()): string {
  * normal month isn't painted like an extreme day (1 for 1D).
  */
 export function heatClass(rawPct: number | null, scale = 1): string {
-  if (rawPct == null || Number.isNaN(rawPct)) return "bg-heat-wait";
+  if (rawPct == null || Number.isNaN(rawPct)) return "heat-wait";
   const pct = rawPct / scale;
-  if (pct >= 4) return "bg-heat-up5";
-  if (pct >= 2.5) return "bg-heat-up4";
-  if (pct >= 1.25) return "bg-heat-up3";
-  if (pct >= 0.4) return "bg-heat-up2";
-  if (pct > 0.05) return "bg-heat-up1";
-  if (pct >= -0.05) return "bg-heat-flat";
-  if (pct > -0.4) return "bg-heat-dn1";
-  if (pct > -1.25) return "bg-heat-dn2";
-  if (pct > -2.5) return "bg-heat-dn3";
-  if (pct > -4) return "bg-heat-dn4";
-  return "bg-heat-dn5";
+  if (pct >= 4) return "heat-up5";
+  if (pct >= 2.5) return "heat-up4";
+  if (pct >= 1.25) return "heat-up3";
+  if (pct >= 0.4) return "heat-up2";
+  if (pct > 0.05) return "heat-up1";
+  if (pct >= -0.05) return "heat-flat";
+  if (pct > -0.4) return "heat-dn1";
+  if (pct > -1.25) return "heat-dn2";
+  if (pct > -2.5) return "heat-dn3";
+  if (pct > -4) return "heat-dn4";
+  return "heat-dn5";
 }
 
 /** 1234.5 → "$1,234.50"; signed adds +/−. */
@@ -118,4 +118,28 @@ export function formatShares(n: number): string {
 export function formatPoints(n: number): string {
   if (!Number.isFinite(n)) return "—";
   return `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toFixed(2)} pts`;
+}
+
+/** 7807.13 → "7,807.13" */
+export function formatLevel(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** Today's date in New York as YYYY-MM-DD (the market's calendar day). */
+export function todayNY(now = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(now);
+}
+
+/** "2026-10-03" → "Oct 3" (adds the year when it isn't this year). */
+export function formatDay(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const date = new Date(Date.UTC(y!, m! - 1, d!));
+  const sameYear = iso.slice(0, 4) === todayNY().slice(0, 4);
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+  }).format(date);
 }
