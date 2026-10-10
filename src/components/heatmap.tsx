@@ -14,6 +14,8 @@ type Props = {
   selected: string | null;
   onSelect: (symbol: string) => void;
   onDrill: (sector: SectorId) => void;
+  /** Colour-band stretch for the selected period (1 for 1D). */
+  heatScale?: number;
 };
 
 const GAP = 1.5;
@@ -49,12 +51,14 @@ function Tile({
   quote,
   selected,
   onSelect,
+  heatScale,
 }: {
   rect: TileRect;
   node: MapNode;
   quote: Quote | undefined;
   selected: boolean;
   onSelect: (symbol: string) => void;
+  heatScale: number;
 }) {
   const w = rect.w - GAP * 2;
   const h = rect.h - GAP * 2;
@@ -76,7 +80,7 @@ function Tile({
       tabIndex={w >= 64 && h >= 48 ? 0 : -1}
       aria-label={`${node.symbol}${quote ? ` ${formatPrice(quote.price)} ${formatPct(quote.changePercent)}` : ""}`}
       onClick={() => onSelect(node.symbol)}
-      className={`tile-ink absolute overflow-hidden text-ink ${heatClass(quote?.changePercent ?? null)} ${selected ? "tile-selected" : ""}`}
+      className={`tile-ink absolute overflow-hidden text-ink ${heatClass(quote?.changePercent ?? null, heatScale)} ${selected ? "tile-selected" : ""}`}
       style={{ left: rect.x + GAP, top: rect.y + GAP, width: w, height: h }}
     >
       <span
@@ -110,6 +114,7 @@ export const Heatmap = memo(function Heatmap({
   selected,
   onSelect,
   onDrill,
+  heatScale = 1,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -180,6 +185,7 @@ export const Heatmap = memo(function Heatmap({
             quote={quotes[rect.id]}
             selected={selected === rect.id}
             onSelect={onSelect}
+            heatScale={heatScale}
           />
         );
       })}
