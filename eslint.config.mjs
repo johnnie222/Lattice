@@ -13,6 +13,9 @@ export default tseslint.config(
       ".output/**",
       ".vercel/**",
       ".nitro/**",
+      // Android build output: the mobile bundle and its copy in the native project.
+      "dist-mobile/**",
+      "android/**",
       "node_modules/**",
       "src/routeTree.gen.ts",
     ],

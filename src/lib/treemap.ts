@@ -108,7 +108,7 @@ export function treemapGrouped(
   const byId = new Map(parents.map((g) => [g.id, g]));
   const tiles: TileRect[] = [];
   const headers: GroupLayout["headers"] = [];
-  const gutter = 3;
+  const gutter = 6;
 
   for (const sr of sectorRects) {
     const g = byId.get(sr.id);
@@ -121,7 +121,7 @@ export function treemapGrouped(
     };
     const show = inner.w >= 52 && inner.h >= 28;
     const reserve = show && inner.h >= 52 && inner.w >= 68;
-    const headH = reserve ? Math.min(22, inner.h * 0.28) : 0;
+    const headH = reserve ? Math.min(20, inner.h * 0.28) : 0;
     if (show) {
       headers.push({
         id: g.id,

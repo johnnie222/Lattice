@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildCloseFacts } from "./close-facts.ts";
+import { buildCloseFacts, closeLine, marketLine } from "./close-facts.ts";
 import { SECTOR_FUNDS, marketFacts } from "./market-facts.ts";
 import { analyzeHoldings, type HoldingQuote } from "./portfolio-intelligence.ts";
 
@@ -190,5 +190,45 @@ describe("close claims are bounded by their structured facts", () => {
     assert.equal(facts.portfolio!.strongestSector, null);
     assert.equal(facts.portfolio!.weakestSector, null);
     assert.match(facts.summary.join(" "), /largest known contributor/);
+  });
+});
+
+describe("close lines for the portfolio day section", () => {
+  it("states the return and the leader without repeating the dollar P&L", () => {
+    const facts = buildCloseFacts(
+      analyzeHoldings({ holdings, quotes: fullQuotes, sectorBySymbol: sectors, benchmarkReturnPercent: 0.54 }),
+      market,
+    );
+    assert.equal(closeLine(facts.portfolio), "Up 0.64%, 0.10 pts ahead of the S&P 500. NVDA led.");
+    assert.doesNotMatch(closeLine(facts.portfolio)!, /\$/);
+  });
+
+  it("never states a return for a partial book, and scopes the leader", () => {
+    const { XOM: _missing, ...partial } = fullQuotes;
+    const facts = buildCloseFacts(
+      analyzeHoldings({ holdings, quotes: partial, sectorBySymbol: sectors, benchmarkReturnPercent: 0.54 }),
+      market,
+    );
+    assert.equal(
+      closeLine(facts.portfolio),
+      "4 of 5 holdings priced, so no full return. NVDA led among priced holdings.",
+    );
+  });
+
+  it("names the biggest drag when nothing rose, and stays empty without priced holdings", () => {
+    const facts = buildCloseFacts(
+      analyzeHoldings({ holdings: [{ symbol: "MSFT", quantity: 1 }], quotes: { MSFT: q(450, 455) } }),
+      market,
+    );
+    assert.equal(closeLine(facts.portfolio), "Down 1.10%. MSFT weighed most.");
+    assert.equal(closeLine(null), null);
+    assert.equal(closeLine(buildCloseFacts(analyzeHoldings({ holdings, quotes: {} }), market).portfolio), null);
+  });
+
+  it("market context: S&P 500, leader and laggard sectors, day type", () => {
+    assert.equal(marketLine(market), "S&P 500 +0.54% · Technology led, Energy lagged · broad advance");
+    const gaps = marketFacts({ "^GSPC": { changePercent: -0.2 } });
+    assert.equal(marketLine(gaps), "S&P 500 -0.20% · sector data incomplete");
+    assert.equal(marketLine(marketFacts({})), "sector data incomplete");
   });
 });

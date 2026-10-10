@@ -10,8 +10,9 @@
  * exist only when the engine reports the book as complete. A partial book
  * yields known dollar P&L only, flagged as partial.
  */
+import { sectorLabel, type SectorId } from "../data/universe.ts";
 import { formatMoney, formatPct } from "./format.ts";
-import type { MarketFacts } from "./market-facts.ts";
+import type { DayType, MarketFacts } from "./market-facts.ts";
 import type {
   HoldingAnalysis,
   HoldingsAnalysis,
@@ -154,6 +155,49 @@ export function closeSummary(portfolio: PortfolioCloseFacts | null, market: Mark
     sentences.push(`The S&P 500 moved ${formatPct(market.benchmarkChangePercent)}${breadth}.`);
   }
   return sentences;
+}
+
+/**
+ * One line for the portfolio day section after the close. The section shows
+ * the dollar P&L as its headline, so this line never repeats it: the return
+ * and S&P 500 comparison only when the book is complete, else the coverage.
+ */
+export function closeLine(portfolio: PortfolioCloseFacts | null): string | null {
+  if (!portfolio || portfolio.dayChange == null) return null;
+  const parts: string[] = [];
+  if (portfolio.complete && portfolio.returnPercent != null) {
+    const r = portfolio.returnPercent;
+    const move = Math.abs(r) < 0.005 ? "Flat" : `${r > 0 ? "Up" : "Down"} ${Math.abs(r).toFixed(2)}%`;
+    parts.push(`${move}${relativeClause(portfolio.relativeReturnPercent)}.`);
+  } else {
+    parts.push(
+      `${portfolio.coverage.priced} of ${plural(portfolio.coverage.holdings, "holding")} priced, so no full return.`,
+    );
+  }
+  const scope = portfolio.complete ? "" : " among priced holdings";
+  if (portfolio.contributors[0]) parts.push(`${portfolio.contributors[0].symbol} led${scope}.`);
+  else if (portfolio.detractors[0]) parts.push(`${portfolio.detractors[0].symbol} weighed most${scope}.`);
+  return parts.join(" ");
+}
+
+const DAY_WORDS: Record<DayType, string> = {
+  "broad-advance": "broad advance",
+  "broad-decline": "broad decline",
+  mixed: "mixed day",
+};
+
+/** "S&P 500 +1.00% · Technology led, Utilities lagged · broad advance". */
+export function marketLine(market: MarketFacts): string | null {
+  const parts: string[] = [];
+  if (market.benchmarkChangePercent != null) parts.push(`S&P 500 ${formatPct(market.benchmarkChangePercent)}`);
+  if (market.strongestSector && market.weakestSector) {
+    parts.push(
+      `${sectorLabel(market.strongestSector.sector as SectorId)} led, ${sectorLabel(market.weakestSector.sector as SectorId)} lagged`,
+    );
+  }
+  if (market.dayType) parts.push(DAY_WORDS[market.dayType]);
+  else if (!market.sectorCoverage.complete) parts.push("sector data incomplete");
+  return parts.length ? parts.join(" · ") : null;
 }
 
 export function buildCloseFacts(

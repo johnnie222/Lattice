@@ -2,9 +2,11 @@
  * Development history provider backed by Yahoo's spark endpoint. This is the
  * only file that knows Yahoo's payload shapes; it returns Lattice DailyBars.
  * Replace it with the licensed provider in #5 (Yahoo must not back the paid
- * product). Server-side only.
+ * product). The web app runs it on the server; the Android app, which has no
+ * server, runs it on the phone with native HTTP.
  */
 import type { DailyBar, DailyHistory, HistoryBatch, HistoryProvider } from "./history-data.ts";
+import { fetchGet, jsonBody, type HttpGet } from "./http-get.ts";
 import { newYorkDate } from "./market-calendar.ts";
 
 const CHUNK = 20;
@@ -88,48 +90,55 @@ function rangeFor(from: string, now = new Date()): string {
   return days <= 360 ? "1y" : "2y";
 }
 
-async function fetchChunk(symbols: string[], from: string): Promise<DailyHistory[]> {
+async function fetchChunk(get: HttpGet, symbols: string[], from: string): Promise<DailyHistory[]> {
   const url = `https://query2.finance.yahoo.com/v8/finance/spark?symbols=${symbols
     .map(encodeURIComponent)
     .join(",")}&range=${rangeFor(from)}&interval=1d`;
   let last = "history failed";
   for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0", Accept: "application/json" },
-      signal: AbortSignal.timeout(15_000),
-    });
+    const res = await get(url, { "User-Agent": "Mozilla/5.0", Accept: "application/json" });
     if (res.status === 429 || res.status >= 500) {
       last = `upstream ${res.status}`;
       await sleep(400 * (attempt + 1));
       continue;
     }
-    if (!res.ok) throw new Error(`upstream ${res.status}`);
-    return checkedSparkHistory(await res.json(), symbols);
+    if (res.status < 200 || res.status >= 300) throw new Error(`upstream ${res.status}`);
+    return checkedSparkHistory(jsonBody(res.data), symbols);
   }
   throw new Error(last);
 }
 
-export const yahooHistoryProvider: HistoryProvider = {
-  name: "yahoo-dev",
-  async dailyCloses(symbols, from) {
-    const chunks: string[][] = [];
-    for (let i = 0; i < symbols.length; i += CHUNK) chunks.push(symbols.slice(i, i + CHUNK));
-    const out: HistoryBatch = { histories: [], unavailable: [] };
-    for (let i = 0; i < chunks.length; i += 2) {
-      const results = await Promise.all(
-        chunks.slice(i, i + 2).map((chunk) =>
-          fetchChunk(chunk, from).then(
-            (histories): HistoryBatch => ({ histories, unavailable: [] }),
-            (): HistoryBatch => ({ histories: [], unavailable: chunk }),
-          ),
+export function createYahooHistoryProvider(get: HttpGet): HistoryProvider {
+  return {
+    name: "yahoo-dev",
+    dailyCloses: (symbols, from) => dailyCloses(get, symbols, from),
+  };
+}
+
+export const yahooHistoryProvider = createYahooHistoryProvider(fetchGet(15_000));
+
+async function dailyCloses(
+  get: HttpGet,
+  symbols: readonly string[],
+  from: string,
+): Promise<HistoryBatch> {
+  const chunks: string[][] = [];
+  for (let i = 0; i < symbols.length; i += CHUNK) chunks.push(symbols.slice(i, i + CHUNK));
+  const out: HistoryBatch = { histories: [], unavailable: [] };
+  for (let i = 0; i < chunks.length; i += 2) {
+    const results = await Promise.all(
+      chunks.slice(i, i + 2).map((chunk) =>
+        fetchChunk(get, chunk, from).then(
+          (histories): HistoryBatch => ({ histories, unavailable: [] }),
+          (): HistoryBatch => ({ histories: [], unavailable: chunk }),
         ),
-      );
-      for (const batch of results) {
-        out.histories.push(...batch.histories);
-        out.unavailable.push(...batch.unavailable);
-      }
-      if (i + 2 < chunks.length) await sleep(80);
+      ),
+    );
+    for (const batch of results) {
+      out.histories.push(...batch.histories);
+      out.unavailable.push(...batch.unavailable);
     }
-    return out;
-  },
-};
+    if (i + 2 < chunks.length) await sleep(80);
+  }
+  return out;
+}
