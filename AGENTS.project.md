@@ -99,6 +99,8 @@ Rules:
 - Build shared domain logic before UI consumers.
 - Do not duplicate portfolio math inside components.
 - Add tests for financial math, time-period calculations, entitlements and data normalization.
+- Install with `npm ci`; if a dependency changes, commit the `package-lock.json` that `npm install` produces with it.
+- `npm test` is the canonical suite and must stay green. It runs every `scripts/**/*.test.mjs` (platform: PWA/share card, preview, auth wiring) and every `src/**/*.test.ts` (product) in one run, so a failure in one never hides the other. Run a subset with `npm run test:app` or `npm run test:platform`.
 - Prefer small reversible PRs over large rewrites.
 - Rebase/update from `main` before starting dependent work.
 - Do not let multiple agents independently invent schemas for the same feature.
