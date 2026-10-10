@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { BOARDS, sectorLabel, type Board, type SectorId } from "@/data/universe";
-import { formatCap, formatPct, formatPrice } from "@/lib/format";
+import { formatCap, formatMoney, formatPct, formatPrice, formatShares } from "@/lib/format";
 import {
   boardNodes,
   findListing,
@@ -13,11 +13,12 @@ import {
 } from "@/lib/market";
 import type { Quote } from "@/lib/quotes";
 import { activeBook, useBooks, type Book } from "@/store/books";
+import { isLegacyBook, suggestQuantities } from "@/lib/book-model";
 import { Mark } from "@/components/mark";
 
-export type SheetId = "boards" | "filter" | "info" | "book" | "stock";
+export type SheetId = "boards" | "filter" | "info" | "book" | "stock" | "today";
 
-function Sheet({
+export function Sheet({
   title,
   onClose,
   children,
@@ -124,8 +125,10 @@ export function InfoSheet({ onClose }: { onClose: () => void }) {
           full screen. Tap a stock for the print and to drop it into your book.
         </p>
         <p>
-          <span className="text-fg">Your book</span> is sized by the weights you type. The number under the
-          title is the weighted average of today’s moves. Weights are saved on this device.
+          <span className="text-fg">Your book</span> holds real positions: shares and, optionally, your average
+          cost. Each tile is sized by its value today (shares × price). Today’s return is your total dollar move
+          divided by yesterday’s closing value, and it is only shown once every holding has a price. Holdings are
+          saved on this device only.
         </p>
       </div>
     </Sheet>
@@ -169,8 +172,8 @@ export function BoardSheet({
             <span className="block text-sm font-semibold">{bookName}</span>
             <span className="block text-xs text-muted">
               {bookCount === 0
-                ? "Empty · add weights"
-                : `${bookCount} ${bookCount === 1 ? "name" : "names"} · your weights`}
+                ? "Empty · add holdings"
+                : `${bookCount} ${bookCount === 1 ? "holding" : "holdings"}`}
             </span>
           </span>
           <span className={`size-2.5 rounded-full ${boardId === "book" ? "bg-up" : "bg-line"}`} />
@@ -253,10 +256,16 @@ export function StockSheet({
     industry: node?.industry ?? "",
     cap: node?.cap ?? 0,
   };
-  const held = book.lines.find((line) => line.symbol === symbol);
-  const [weight, setWeight] = useState(held ? String(round1(held.weight)) : "5");
-  const upsert = useBooks((s) => s.upsert);
-  const removeLine = useBooks((s) => s.removeLine);
+  const legacy = isLegacyBook(book);
+  const held = book.holdings.find((holding) => holding.symbol === symbol);
+  const legacyLine = legacy ? book.lines.find((line) => line.symbol === symbol) : undefined;
+  const [quantity, setQuantity] = useState(held ? String(held.quantity) : "");
+  const [cost, setCost] = useState(held?.averageCost != null ? String(held.averageCost) : "");
+  const saveHolding = useBooks((s) => s.saveHolding);
+  const removeHolding = useBooks((s) => s.removeHolding);
+  const quantityN = parseAmount(quantity);
+  const costN = cost.trim() ? parseAmount(cost) : null;
+  const canSave = quantityN != null && (cost.trim() === "" || costN != null);
   const sector = (node?.sector ?? listing.sector) as SectorId;
   const up = (quote?.changePercent ?? 0) >= 0;
 
@@ -285,45 +294,73 @@ export function StockSheet({
         </div>
         <div>
           <dt className="text-xs text-muted">In {book.name}</dt>
-          <dd className="font-mono">{held ? `${round1(held.weight)}%` : "Not held"}</dd>
+          <dd className="font-mono">
+            {held
+              ? `${formatShares(held.quantity)} ${held.quantity === 1 ? "share" : "shares"}`
+              : legacyLine
+                ? `${round1(legacyLine.weight)} weight`
+                : "Not held"}
+          </dd>
         </div>
       </dl>
-      <label className="mt-5 block text-xs font-medium text-muted" htmlFor="weight">
-        Weight in {book.name}
-      </label>
-      <div className="mt-2 flex gap-2">
-        <input
-          id="weight"
-          inputMode="decimal"
-          value={weight}
-          onChange={(event) => setWeight(event.target.value)}
-          className="h-12 w-28 rounded-xl border border-line bg-bg px-3 font-mono text-base"
-        />
-        <button
-          type="button"
-          className="h-12 flex-1 rounded-xl bg-fg font-semibold text-bg"
-          onClick={() => {
-            const next = Number(weight);
-            if (!Number.isFinite(next)) return;
-            upsert(symbol, next);
-            onClose();
-          }}
-        >
-          {held ? "Update weight" : "Add to book"}
-        </button>
-      </div>
-      {held ? (
-        <button
-          type="button"
-          className="mt-3 h-11 w-full text-sm font-medium text-down"
-          onClick={() => {
-            removeLine(symbol);
-            onClose();
-          }}
-        >
-          Remove from book
-        </button>
-      ) : null}
+      {legacy ? (
+        <p className="mt-5 rounded-xl border border-line px-3 py-3 text-sm leading-relaxed text-muted">
+          {book.name} still uses weights from an earlier version. Convert it to holdings from the book
+          editor to add positions by share count.
+        </p>
+      ) : (
+        <>
+          <div className="mt-5 grid grid-cols-2 gap-2">
+            <label className="block text-xs font-medium text-muted">
+              Shares
+              <input
+                inputMode="decimal"
+                value={quantity}
+                placeholder="10"
+                onChange={(event) => setQuantity(event.target.value)}
+                className="mt-1 h-12 w-full rounded-xl border border-line bg-bg px-3 font-mono text-base text-fg"
+              />
+            </label>
+            <label className="block text-xs font-medium text-muted">
+              Average cost, optional
+              <input
+                inputMode="decimal"
+                value={cost}
+                placeholder={quote ? quote.price.toFixed(2) : "$"}
+                onChange={(event) => setCost(event.target.value)}
+                className="mt-1 h-12 w-full rounded-xl border border-line bg-bg px-3 font-mono text-base text-fg"
+              />
+            </label>
+          </div>
+          {quantityN != null && quote ? (
+            <p className="mt-2 text-xs text-muted">Worth {formatMoney(quantityN * quote.price)} at today’s price.</p>
+          ) : null}
+          <button
+            type="button"
+            disabled={!canSave}
+            className="mt-3 h-12 w-full rounded-xl bg-fg font-semibold text-bg disabled:opacity-40"
+            onClick={() => {
+              if (quantityN == null) return;
+              saveHolding({ symbol, quantity: quantityN, averageCost: costN });
+              onClose();
+            }}
+          >
+            {held ? "Update holding" : "Add to book"}
+          </button>
+          {held ? (
+            <button
+              type="button"
+              className="mt-3 h-11 w-full text-sm font-medium text-down"
+              onClick={() => {
+                removeHolding(symbol);
+                onClose();
+              }}
+            >
+              Remove from book
+            </button>
+          ) : null}
+        </>
+      )}
       {canDrill ? (
         <button
           type="button"
@@ -341,33 +378,177 @@ function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
-export function BookSheet({ onClose }: { onClose: () => void }) {
+/** "1,234.5" or "$12" → 1234.5; null unless a positive finite number. */
+function parseAmount(raw: string): number | null {
+  const n = Number(raw.replace(/[,$\s]/g, ""));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function HoldingRow({ symbol, quantity, averageCost }: { symbol: string; quantity: number; averageCost: number | null }) {
+  const saveHolding = useBooks((s) => s.saveHolding);
+  const removeHolding = useBooks((s) => s.removeHolding);
+  return (
+    <div className="flex items-center gap-2">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold">{symbol}</p>
+        <p className="truncate text-xs text-muted">{findListing(symbol)?.name ?? "Custom ticker"}</p>
+      </div>
+      <input
+        inputMode="decimal"
+        aria-label={`${symbol} shares`}
+        title="Shares"
+        defaultValue={String(quantity)}
+        key={`${symbol}-q-${quantity}`}
+        onBlur={(event) => {
+          const next = parseAmount(event.target.value);
+          if (next != null) saveHolding({ symbol, quantity: next, averageCost });
+          else event.target.value = String(quantity);
+        }}
+        className="h-11 w-20 rounded-xl border border-line bg-bg px-2 text-right font-mono"
+      />
+      <input
+        inputMode="decimal"
+        aria-label={`${symbol} average cost`}
+        title="Average cost per share"
+        placeholder="cost"
+        defaultValue={averageCost != null ? String(averageCost) : ""}
+        key={`${symbol}-c-${averageCost}`}
+        onBlur={(event) => {
+          const raw = event.target.value.trim();
+          saveHolding({ symbol, quantity, averageCost: raw ? parseAmount(raw) : null });
+        }}
+        className="h-11 w-20 rounded-xl border border-line bg-bg px-2 text-right font-mono"
+      />
+      <button
+        type="button"
+        aria-label={`Remove ${symbol}`}
+        onClick={() => removeHolding(symbol)}
+        className="grid size-11 place-items-center rounded-xl text-muted"
+      >
+        <X className="size-4" />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Converting a book saved with weights. Weights stay visible and untouched
+ * until the user enters share counts and confirms; suggestions from the old
+ * book size are offered but never applied on their own.
+ */
+function LegacyConversion({ book, quotes }: { book: Book; quotes: Record<string, Quote> }) {
+  const convertLegacy = useBooks((s) => s.convertLegacy);
+  const removeLegacyLine = useBooks((s) => s.removeLegacyLine);
+  const lines = book.lines.filter((line) => line.weight > 0);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const suggestions = useMemo(
+    () =>
+      suggestQuantities(
+        lines,
+        book.notional,
+        Object.fromEntries(lines.map((line) => [line.symbol, quotes[line.symbol]?.price])),
+      ),
+    [lines, book.notional, quotes],
+  );
+  const hasSuggestions = Object.values(suggestions).some((value) => value != null);
+  const parsed = lines.map((line) => ({ symbol: line.symbol, quantity: parseAmount(draft[line.symbol] ?? "") }));
+  const ready = parsed.length > 0 && parsed.every((row) => row.quantity != null);
+
+  return (
+    <div className="rounded-xl border border-line p-3">
+      <p className="text-sm font-semibold">Switch {book.name} to real holdings</p>
+      <p className="mt-1 text-xs leading-relaxed text-muted">
+        This book was saved with weights. Enter how many shares you hold of each; Lattice then sizes the book by
+        value and shows exact dollar moves. Your weights stay exactly as they are until you convert, and nothing
+        leaves this device.
+      </p>
+      {hasSuggestions ? (
+        <button
+          type="button"
+          className="mt-2 h-10 text-sm font-medium text-fg underline underline-offset-4"
+          onClick={() =>
+            setDraft((prev) => {
+              const next = { ...prev };
+              for (const [symbol, value] of Object.entries(suggestions)) {
+                if (value != null && !next[symbol]) next[symbol] = String(Math.round(value * 10_000) / 10_000);
+              }
+              return next;
+            })
+          }
+        >
+          Estimate shares from your {formatMoney(book.notional ?? 0)} book size
+        </button>
+      ) : null}
+      <div className="mt-2 flex flex-col gap-2">
+        {lines.map((line) => (
+          <div key={line.symbol} className="flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold">{line.symbol}</p>
+              <p className="truncate text-xs text-muted">weight {round1(line.weight)}</p>
+            </div>
+            <input
+              inputMode="decimal"
+              aria-label={`${line.symbol} shares`}
+              placeholder="shares"
+              value={draft[line.symbol] ?? ""}
+              onChange={(event) => setDraft((prev) => ({ ...prev, [line.symbol]: event.target.value }))}
+              className="h-11 w-24 rounded-xl border border-line bg-bg px-2 text-right font-mono"
+            />
+            <button
+              type="button"
+              aria-label={`Remove ${line.symbol}`}
+              onClick={() => removeLegacyLine(line.symbol)}
+              className="grid size-11 place-items-center rounded-xl text-muted"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+        ))}
+      </div>
+      <button
+        type="button"
+        disabled={!ready}
+        onClick={() =>
+          convertLegacy(parsed.map((row) => ({ symbol: row.symbol, quantity: row.quantity!, averageCost: null })))
+        }
+        className="mt-3 h-12 w-full rounded-xl bg-fg font-semibold text-bg disabled:opacity-40"
+      >
+        Convert to holdings
+      </button>
+      {!ready ? <p className="mt-1 text-xs text-muted">Enter shares for every ticker, or remove the ones you no longer hold.</p> : null}
+    </div>
+  );
+}
+
+export function BookSheet({ quotes, onClose }: { quotes: Record<string, Quote>; onClose: () => void }) {
   const books = useBooks((s) => s.books);
   const activeId = useBooks((s) => s.activeId);
   const book = activeBook({ books, activeId });
   const rename = useBooks((s) => s.rename);
-  const setNotional = useBooks((s) => s.setNotional);
-  const upsert = useBooks((s) => s.upsert);
-  const removeLine = useBooks((s) => s.removeLine);
-  const equalize = useBooks((s) => s.equalize);
-  const normalize = useBooks((s) => s.normalize);
+  const saveHolding = useBooks((s) => s.saveHolding);
   const newBook = useBooks((s) => s.newBook);
   const removeActive = useBooks((s) => s.removeActive);
   const setActive = useBooks((s) => s.setActive);
   const [draft, setDraft] = useState("");
+  const [shares, setShares] = useState("");
+  const [cost, setCost] = useState("");
   const ideas = suggestListings(draft);
-  const sum = book.lines.reduce((total, line) => total + line.weight, 0);
+  const legacy = isLegacyBook(book);
+  const sharesN = parseAmount(shares);
+  const costN = cost.trim() ? parseAmount(cost) : null;
+  const symbol = normalizeSymbol(draft);
+  const canAdd = Boolean(symbol) && sharesN != null && (cost.trim() === "" || costN != null);
 
-  const add = (raw: string) => {
-    const symbol = normalizeSymbol(raw);
-    if (!symbol) return;
-    const exists = book.lines.some((line) => line.symbol === symbol);
-    upsert(symbol, exists ? (book.lines.find((line) => line.symbol === symbol)?.weight ?? 5) : book.lines.length ? 5 : 100);
+  const add = () => {
+    if (!canAdd || sharesN == null) return;
+    saveHolding({ symbol, quantity: sharesN, averageCost: costN });
     setDraft("");
+    setShares("");
+    setCost("");
   };
 
   return (
-    <Sheet title="Portfolio" onClose={onClose}>
+    <Sheet title="Book" onClose={onClose}>
       {books.length > 1 ? (
         <div className="mb-3 flex gap-2 overflow-x-auto">
           {books.map((item) => (
@@ -391,101 +572,86 @@ export function BookSheet({ onClose }: { onClose: () => void }) {
         onChange={(event) => rename(event.target.value)}
         className="mt-1 h-12 w-full rounded-xl border border-line bg-bg px-3 text-base"
       />
-      <p className={`mt-3 font-mono text-sm ${Math.abs(sum - 100) < 0.2 ? "text-muted" : "text-fg"}`}>
-        Weights sum to {sum.toFixed(1)}%
-        {Math.abs(sum - 100) >= 0.2 ? " · map uses relative size" : ""}
-      </p>
-      <div className="mt-3 flex gap-2">
-        <button type="button" onClick={equalize} className="h-11 flex-1 rounded-xl border border-line text-sm font-medium">
-          Equal weight
-        </button>
-        <button type="button" onClick={normalize} className="h-11 flex-1 rounded-xl border border-line text-sm font-medium">
-          Scale to 100%
-        </button>
-      </div>
-      <div className="mt-4 flex flex-col gap-2">
-        {book.lines.map((line) => (
-          <div key={line.symbol} className="flex items-center gap-2">
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold">{line.symbol}</p>
-              <p className="truncate text-xs text-muted">{findListing(line.symbol)?.name ?? "Custom ticker"}</p>
+      <div className="mt-4">
+        {legacy ? (
+          <LegacyConversion book={book} quotes={quotes} />
+        ) : (
+          <>
+            {book.holdings.length ? (
+              <>
+                <div className="mb-1 flex justify-end gap-2 pr-[52px] text-[11px] text-muted">
+                  <span className="w-20 text-right">Shares</span>
+                  <span className="w-20 text-right">Avg cost</span>
+                </div>
+                <div className="flex flex-col gap-2">
+                  {book.holdings.map((holding) => (
+                    <HoldingRow key={holding.symbol} {...holding} />
+                  ))}
+                </div>
+              </>
+            ) : null}
+            <p className="mt-4 text-xs font-medium text-muted">Add a holding</p>
+            <div className="mt-1 flex gap-2">
+              <input
+                aria-label="Ticker"
+                value={draft}
+                onChange={(event) => setDraft(event.target.value.toUpperCase())}
+                placeholder="NVDA"
+                className="h-12 min-w-0 flex-1 rounded-xl border border-line bg-bg px-3 font-mono uppercase"
+              />
+              <input
+                aria-label="Shares"
+                inputMode="decimal"
+                value={shares}
+                onChange={(event) => setShares(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") add();
+                }}
+                placeholder="shares"
+                className="h-12 w-20 rounded-xl border border-line bg-bg px-2 text-right font-mono"
+              />
+              <input
+                aria-label="Average cost, optional"
+                inputMode="decimal"
+                value={cost}
+                onChange={(event) => setCost(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") add();
+                }}
+                placeholder="cost"
+                className="h-12 w-20 rounded-xl border border-line bg-bg px-2 text-right font-mono"
+              />
             </div>
-            <input
-              inputMode="decimal"
-              aria-label={`${line.symbol} weight`}
-              defaultValue={String(round1(line.weight))}
-              key={`${line.symbol}-${round1(line.weight)}`}
-              onBlur={(event) => {
-                const next = Number(event.target.value);
-                if (Number.isFinite(next)) upsert(line.symbol, next);
-              }}
-              className="h-11 w-20 rounded-xl border border-line bg-bg px-2 text-right font-mono"
-            />
+            {ideas.length && !ideas.some((idea) => idea.symbol === symbol) ? (
+              <div className="mt-2 flex flex-col">
+                {ideas.map((idea) => (
+                  <button
+                    key={idea.symbol}
+                    type="button"
+                    onClick={() => setDraft(idea.symbol)}
+                    className="flex h-11 items-center justify-between text-left text-sm"
+                  >
+                    <span className="font-semibold">{idea.symbol}</span>
+                    <span className="truncate pl-3 text-muted">{idea.name}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <button
               type="button"
-              aria-label={`Remove ${line.symbol}`}
-              onClick={() => removeLine(line.symbol)}
-              className="grid size-11 place-items-center rounded-xl text-muted"
+              disabled={!canAdd}
+              onClick={add}
+              className="mt-2 h-12 w-full rounded-xl bg-fg font-semibold text-bg disabled:opacity-40"
             >
-              <X className="size-4" />
+              Add
             </button>
-          </div>
-        ))}
+            <p className="mt-2 text-xs leading-relaxed text-muted">
+              Fractional shares are fine. Average cost is optional and only used for your gain since entry. Holdings
+              are saved on this device only.
+            </p>
+          </>
+        )}
       </div>
-      <label className="mt-4 block text-xs font-medium text-muted" htmlFor="add-ticker">
-        Add ticker
-      </label>
-      <div className="mt-1 flex gap-2">
-        <input
-          id="add-ticker"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value.toUpperCase())}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") add(draft);
-          }}
-          placeholder="NVDA"
-          className="h-12 min-w-0 flex-1 rounded-xl border border-line bg-bg px-3 font-mono uppercase"
-        />
-        <button type="button" onClick={() => add(draft)} className="h-12 rounded-xl bg-fg px-4 font-semibold text-bg">
-          Add
-        </button>
-      </div>
-      {ideas.length ? (
-        <div className="mt-2 flex flex-col">
-          {ideas.map((idea) => (
-            <button
-              key={idea.symbol}
-              type="button"
-              onClick={() => add(idea.symbol)}
-              className="flex h-11 items-center justify-between text-left text-sm"
-            >
-              <span className="font-semibold">{idea.symbol}</span>
-              <span className="truncate pl-3 text-muted">{idea.name}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
-      <label className="mt-4 block text-xs font-medium text-muted" htmlFor="notional">
-        Book size, optional $
-      </label>
-      <input
-        id="notional"
-        inputMode="decimal"
-        defaultValue={book.notional ?? ""}
-        key={book.id}
-        placeholder="100000"
-        onBlur={(event) => {
-          const raw = event.target.value.trim();
-          if (!raw) {
-            setNotional(null);
-            return;
-          }
-          const next = Number(raw.replace(/,/g, ""));
-          setNotional(Number.isFinite(next) && next > 0 ? next : null);
-        }}
-        className="mt-1 h-12 w-full rounded-xl border border-line bg-bg px-3 font-mono"
-      />
-      <p className="mt-1 text-xs text-muted">Used only to turn the weighted % into dollars. Nothing is sent anywhere.</p>
       <div className="mt-4 flex gap-4">
         <button type="button" onClick={newBook} className="h-11 text-sm font-medium text-fg">
           New book

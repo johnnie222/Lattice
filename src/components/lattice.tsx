@@ -4,6 +4,9 @@ import { ChevronDown, ChevronLeft, Filter, Search } from "lucide-react";
 import { BOARDS, sectorLabel, type SectorId } from "@/data/universe";
 import { Heatmap } from "@/components/heatmap";
 import { BoardSheet, BookSheet, FilterSheet, InfoSheet, StockSheet, type SheetId } from "@/components/sheets";
+import { TodaySheet, TodayStrip } from "@/components/today";
+import { analyzeBook, BENCHMARK_SYMBOL, bookSymbols, bookTileWeights } from "@/lib/book-analysis";
+import { isLegacyBook } from "@/lib/book-model";
 import { formatAsOf, formatPct, marketClock, sessionLabel, type Session } from "@/lib/format";
 import {
   applyPriceWeights,
@@ -19,11 +22,6 @@ import {
 } from "@/lib/market";
 import { useQuotes } from "@/lib/use-quotes";
 import { activeBook, useBooks } from "@/store/books";
-
-function formatDollars(n: number): string {
-  const sign = n > 0 ? "+" : n < 0 ? "-" : "";
-  return `${sign}$${Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
-}
 
 const DEFAULT_BOARD = "spx";
 // Past this, quotes on screen are called out as delayed.
@@ -77,35 +75,39 @@ export function Lattice() {
 
   const rawNodes = useMemo(() => {
     if (bookMode) {
-      return book.lines
-        .filter((line) => line.weight > 0)
-        .map((line): MapNode => {
-          const listing = findListing(line.symbol) ?? syntheticListing(line.symbol);
-          return {
-            symbol: listing.symbol,
-            name: listing.name,
-            sector: listing.sector,
-            industry: listing.industry,
-            cap: listing.cap,
-            weight: line.weight,
-          };
-        });
+      // Tile sizes come from the analysis below; symbols must not depend on quotes.
+      return bookSymbols(book).map((symbol): MapNode => {
+        const listing = findListing(symbol) ?? syntheticListing(symbol);
+        return {
+          symbol: listing.symbol,
+          name: listing.name,
+          sector: listing.sector,
+          industry: listing.industry,
+          cap: listing.cap,
+          weight: 1,
+        };
+      });
     }
     return boardNodes(board);
-  }, [bookMode, book.lines, board]);
+  }, [bookMode, book, board]);
 
   // Symbols come from the quote-independent nodes so price weighting can't
   // change the fetch key and restart polling.
-  const symbols = useMemo(
-    () => [...rawNodes].sort((a, b) => b.weight - a.weight).map((node) => node.symbol),
-    [rawNodes],
-  );
+  // The book also needs the S&P 500 for "vs S&P 500".
+  const symbols = useMemo(() => {
+    const list = [...rawNodes].sort((a, b) => b.weight - a.weight).map((node) => node.symbol);
+    return bookMode ? [...list, BENCHMARK_SYMBOL] : list;
+  }, [rawNodes, bookMode]);
   const { quotes, asOf, status } = useQuotes(symbols, refreshToken);
   const priceWeighted = !bookMode && board.weighting === "price";
-  const baseNodes = useMemo(
-    () => (priceWeighted ? applyPriceWeights(rawNodes, quotes) : rawNodes),
-    [priceWeighted, rawNodes, quotes],
-  );
+  const bookResult = useMemo(() => (bookMode ? analyzeBook(book, quotes) : null), [bookMode, book, quotes]);
+  const baseNodes = useMemo(() => {
+    if (bookResult) {
+      const weights = bookTileWeights(book, bookResult);
+      return rawNodes.map((node) => ({ ...node, weight: weights.get(node.symbol) ?? 0 })).filter((node) => node.weight > 0);
+    }
+    return priceWeighted ? applyPriceWeights(rawNodes, quotes) : rawNodes;
+  }, [bookResult, book, priceWeighted, rawNodes, quotes]);
 
   const visible = useMemo(() => {
     return baseNodes.filter((node) => {
@@ -117,14 +119,19 @@ export function Lattice() {
 
   const sectorCount = useMemo(() => new Set(visible.map((node) => node.sector)).size, [visible]);
   const grouped = !bookMode && board.grouped && !drill && !query && sectorCount > 1 && visible.length > 24;
-  const move = weightedChange(visible.length ? visible : baseNodes, quotes);
+  // In book mode the headline comes from the engine, which never presents a
+  // partial book's return as complete; the map's weighted move would.
+  const bookReturn = bookResult ? bookResult.analysis.returnPercent : null;
+  const move = bookMode ? bookReturn : weightedChange(visible.length ? visible : baseNodes, quotes);
   const quoted = visible.filter((node) => quotes[node.symbol]);
   const ups = quoted.filter((node) => (quotes[node.symbol]?.changePercent ?? 0) > 0.05).length;
   const downs = quoted.filter((node) => (quotes[node.symbol]?.changePercent ?? 0) < -0.05).length;
 
   const title = bookMode ? book.name : drill ? sectorLabel(drill) : board.title;
   const subtitle = bookMode
-    ? "Your weights"
+    ? isLegacyBook(book)
+      ? "Your weights"
+      : "Your holdings"
     : drill
       ? board.title
       : board.name !== board.title
@@ -180,9 +187,9 @@ export function Lattice() {
   const now = Date.now();
   const stale = asOf != null && (status === "error" || now - asOf > STALE_MS[session]);
   const asOfLabel = asOf != null ? formatAsOf(asOf, now) : null;
-  const pnl = bookMode && book.notional && move != null ? (book.notional * move) / 100 : null;
   const showMap = visible.length > 0;
-  const bookEmpty = bookMode && book.lines.filter((line) => line.weight > 0).length === 0;
+  const bookEmpty = bookMode && bookSymbols(book).length === 0;
+  const bookPartial = bookResult != null && !bookResult.analysis.complete && bookSymbols(book).length > 0;
 
   return (
     <main className="flex h-dvh flex-col bg-bg text-fg">
@@ -224,8 +231,13 @@ export function Lattice() {
               </button>
             )}
             <p className={`font-mono text-sm font-medium ${move == null ? "text-muted" : move >= 0 ? "text-up" : "text-down"}`}>
-              {move == null ? (status === "error" ? "Tape delayed" : "Loading tape") : formatPct(move)}
-              {pnl != null ? <span className="text-fg"> · {formatDollars(pnl)}</span> : null}
+              {move != null
+                ? formatPct(move)
+                : bookPartial && quoted.length
+                  ? "Partial data"
+                  : status === "error"
+                    ? "Tape delayed"
+                    : "Loading tape"}
             </p>
           </div>
           <button
@@ -250,21 +262,26 @@ export function Lattice() {
         <p className="truncate px-2 text-center text-xs text-muted">
           {subtitle ? `${subtitle} · ` : ""}
           {sessionLabel(session)}
-          {quoted.length ? ` · ${ups} up · ${downs} down` : ""}
+          {quoted.length && !bookMode ? ` · ${ups} up · ${downs} down` : ""}
           {asOfLabel ? (
             <span className={stale ? "text-down" : undefined}>
               {stale ? ` · Delayed, as of ${asOfLabel}` : ` · as of ${asOfLabel}`}
             </span>
           ) : null}
-          {bookMode ? (
-            <>
-              {" · "}
-              <button type="button" className="font-medium text-fg" onClick={() => setSheet("book")}>
-                Edit weights
-              </button>
-            </>
-          ) : null}
+
         </p>
+        {bookResult && !bookEmpty ? (
+          <div className="mt-2 flex gap-2">
+            <TodayStrip result={bookResult} onOpen={() => setSheet("today")} />
+            <button
+              type="button"
+              onClick={() => setSheet("book")}
+              className="shrink-0 rounded-xl border border-line bg-surface px-3 text-sm font-medium"
+            >
+              Edit book
+            </button>
+          </div>
+        ) : null}
         {searchOpen ? (
           <div className="mt-2 flex items-center gap-2 px-1">
             <input
@@ -288,7 +305,8 @@ export function Lattice() {
           <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
             <p className="text-lg font-semibold">Build a book</p>
             <p className="max-w-xs text-sm leading-relaxed text-muted">
-              Add tickers and a weight for each. Tile size follows the weight. Color is today’s move.
+              Add the stocks you hold and how many shares. Tile size follows each holding’s value. Color is
+              today’s move. Everything stays on this device.
             </p>
             <button
               type="button"
@@ -328,7 +346,7 @@ export function Lattice() {
         <BoardSheet
           boardId={boardId}
           bookName={book.name}
-          bookCount={book.lines.length}
+          bookCount={bookSymbols(book).length}
           onPick={(id) => {
             setView({ board: id, sector: null });
             setSheet(null);
@@ -345,7 +363,8 @@ export function Lattice() {
         <FilterSheet filter={filter} onChange={setFilter} onClose={() => setSheet(null)} />
       ) : null}
       {sheet === "info" ? <InfoSheet onClose={() => setSheet(null)} /> : null}
-      {sheet === "book" ? <BookSheet onClose={() => setSheet(null)} /> : null}
+      {sheet === "book" ? <BookSheet quotes={quotes} onClose={() => setSheet(null)} /> : null}
+      {sheet === "today" && bookResult ? <TodaySheet result={bookResult} onClose={() => setSheet(null)} /> : null}
       {sheet === "stock" && selected ? (
         <StockSheet
           key={selected}

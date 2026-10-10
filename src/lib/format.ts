@@ -173,3 +173,23 @@ export function heatClass(pct: number | null): string {
   if (pct > -4) return "bg-heat-dn4";
   return "bg-heat-dn5";
 }
+
+/** 1234.5 → "$1,234.50"; signed adds +/−. */
+export function formatMoney(n: number, signed = false): string {
+  if (!Number.isFinite(n)) return "—";
+  const body = Math.abs(n).toLocaleString("en-US", { style: "currency", currency: "USD" });
+  if (signed) return `${n > 0 ? "+" : n < 0 ? "−" : ""}${body}`;
+  return n < 0 ? `−${body}` : body;
+}
+
+/** Share counts keep up to 4 decimals for fractional holdings: 0.375, 12. */
+export function formatShares(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  return n.toLocaleString("en-US", { maximumFractionDigits: 4 });
+}
+
+/** Percentage-point difference: +0.80 pts. */
+export function formatPoints(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  return `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toFixed(2)} pts`;
+}
