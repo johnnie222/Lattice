@@ -3,8 +3,8 @@ export function formatPrice(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
-export function formatPct(n: number, digits = 2): string {
-  if (!Number.isFinite(n)) return "—";
+export function formatPct(n: number | null, digits = 2): string {
+  if (n == null || !Number.isFinite(n)) return "—";
   const sign = n > 0 ? "+" : "";
   return `${sign}${n.toFixed(digits)}%`;
 }
@@ -172,4 +172,24 @@ export function heatClass(pct: number | null): string {
   if (pct > -2.5) return "bg-heat-dn3";
   if (pct > -4) return "bg-heat-dn4";
   return "bg-heat-dn5";
+}
+
+/** 1234.5 → "$1,234.50"; signed adds +/−. */
+export function formatMoney(n: number, signed = false): string {
+  if (!Number.isFinite(n)) return "—";
+  const body = Math.abs(n).toLocaleString("en-US", { style: "currency", currency: "USD" });
+  if (signed) return `${n > 0 ? "+" : n < 0 ? "−" : ""}${body}`;
+  return n < 0 ? `−${body}` : body;
+}
+
+/** Keep small fractional holdings visible instead of rounding them to zero. */
+export function formatShares(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  return n.toLocaleString("en-US", { maximumSignificantDigits: 12 });
+}
+
+/** Percentage-point difference: +0.80 pts. */
+export function formatPoints(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  return `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toFixed(2)} pts`;
 }

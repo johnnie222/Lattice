@@ -1,11 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 
-export type Quote = {
-  symbol: string;
-  price: number;
-  change: number;
-  changePercent: number;
-};
+import { parseQuote, type Quote } from "./quote-data.ts";
+export type { Quote } from "./quote-data.ts";
 
 type CacheEntry = { at: number; q: Quote };
 
@@ -20,7 +16,8 @@ function parseSymbols(input: unknown): { symbols: string[]; fresh: boolean } {
     new Set(
       raw
         .map((s) => String(s).trim().toUpperCase().replace(/\./g, "-"))
-        .filter((s) => /^[A-Z0-9-]{1,10}$/.test(s)),
+        // A leading ^ marks an index, e.g. ^GSPC for the S&P 500 benchmark.
+        .filter((s) => /^\^?[A-Z0-9-]{1,10}$/.test(s)),
     ),
   ).slice(0, 600);
   return { symbols, fresh: obj.fresh === true };
@@ -31,7 +28,7 @@ function sleep(ms: number) {
 }
 
 async function fetchChunk(symbols: string[]): Promise<Quote[]> {
-  const url = `https://query2.finance.yahoo.com/v8/finance/spark?symbols=${symbols.join(",")}&range=1d&interval=1d`;
+  const url = `https://query2.finance.yahoo.com/v8/finance/spark?symbols=${symbols.map(encodeURIComponent).join(",")}&range=1d&interval=1d`;
   let last = "quote failed";
   for (let attempt = 0; attempt < 3; attempt++) {
     const res = await fetch(url, {
@@ -53,19 +50,8 @@ async function fetchChunk(symbols: string[]): Promise<Quote[]> {
     }
     const out: Quote[] = [];
     for (const symbol of symbols) {
-      const row = data[symbol];
-      if (!row || typeof row !== "object") continue;
-      const rec = row as Record<string, unknown>;
-      const price = Number(rec.fulldayPrice);
-      const change = Number(rec.fulldayChange);
-      const changePercent = Number(rec.fulldayChangePercent);
-      if (!Number.isFinite(price)) continue;
-      out.push({
-        symbol,
-        price,
-        change: Number.isFinite(change) ? change : 0,
-        changePercent: Number.isFinite(changePercent) ? changePercent : 0,
-      });
+      const quote = parseQuote(symbol, data[symbol]);
+      if (quote) out.push(quote);
     }
     return out;
   }
